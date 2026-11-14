@@ -14,5 +14,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: node tools/profile-test.mjs
       - run: npm run build
       - run: git diff --check
