@@ -6,6 +6,33 @@ import { heroFace, zombieFace, zombieShirt, heroJacket } from './faces.js';
 // Big-headed block figure. Limbs are rigid boxes that swing from a pivot:
 // the stiffness is the style, so there is no skinning or IK anywhere.
 const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+const GEO = {
+  leg: box(0.19, 0.42, 0.22),
+  torso: box(0.46, 0.5, 0.28),
+  arm: box(0.15, 0.46, 0.16),
+  headZ: box(0.48, 0.48, 0.48),
+  headH: box(0.5, 0.5, 0.5),
+};
+export const ZOMBIE_VARIANTS = 8;
+
+// Materials are shared per look so a horde costs no extra shader setup.
+const cache = new Map();
+function looks(kind, variant) {
+  const key = `${kind}:${variant}`;
+  if (cache.has(key)) return cache.get(key);
+  const zombie = kind === 'zombie';
+  const m = {
+    skin: toon(zombie ? COL.zombie : COL.skin, { hatch: false }),
+    cloth: toon(zombie ? COL.zombieCloth : COL.hero),
+    pants: toon(zombie ? COL.rust : COL.heroDark, { shadeInk: 0.35 }),
+    hair: toon(COL.ink, { hatch: false }),
+    face: toon(0xffffff, { map: zombie ? zombieFace(variant) : heroFace(), hatch: false }),
+    chest: toon(0xffffff, { map: zombie ? zombieShirt(variant) : heroJacket() }),
+  };
+  cache.set(key, m);
+  return m;
+}
+const FLASH = toon(COL.paper, { hatch: false, mid: 1 });
 
 function part(geo, mat, y = 0) {
   const m = new THREE.Mesh(geo, mat);
@@ -14,65 +41,54 @@ function part(geo, mat, y = 0) {
   m.position.y = y;
   return m;
 }
-
-/** Box with one decorated face (+Z) and plain sides. */
-function faced(geo, plain, front) {
-  return [plain, plain, plain, plain, front, plain];
-}
+/** Box material array with one decorated face (+Z). */
+const faced = (plain, front) => [plain, plain, plain, plain, front, plain];
 
 export class BlockMan {
-  constructor({ kind = 'zombie', seed = 0 } = {}) {
+  constructor({ kind = 'zombie', variant = 0 } = {}) {
     this.kind = kind;
-    this.seed = seed;
     this.t = Math.random() * 10;
+    this.flashT = 0;
+    this.recoil = 0;
     const zombie = kind === 'zombie';
-
-    const skin = toon(zombie ? COL.zombie : COL.skin, { hatch: false });
-    const cloth = toon(zombie ? COL.zombieCloth : COL.hero);
-    const pants = toon(zombie ? COL.rust : COL.heroDark, { shadeInk: 0.35 });
-    const hair = toon(COL.ink, { hatch: false });
-    const face = toon(0xffffff, { map: zombie ? zombieFace(seed) : heroFace(), hatch: false });
-    const chest = toon(0xffffff, { map: zombie ? zombieShirt(seed) : heroJacket() });
+    const M = looks(kind, zombie ? variant % ZOMBIE_VARIANTS : 0);
 
     this.root = new THREE.Group();     // world placement + facing
+    this.root.rotation.order = 'YXZ';  // yaw first, then topple
     this.body = new THREE.Group();     // bob / lean
     this.root.add(this.body);
 
-    // legs (pivot at hip)
+    // The model faces +Z, so its own left side is +X.
     this.legL = new THREE.Group(); this.legL.position.set(0.11, 0.42, 0);
     this.legR = new THREE.Group(); this.legR.position.set(-0.11, 0.42, 0);
-    this.legL.add(part(box(0.19, 0.42, 0.22), pants, -0.21));
-    this.legR.add(part(box(0.19, 0.42, 0.22), pants, -0.21));
+    this.legL.add(part(GEO.leg, M.pants, -0.21));
+    this.legR.add(part(GEO.leg, M.pants, -0.21));
     this.body.add(this.legL, this.legR);
 
-    // torso
     this.torso = new THREE.Group(); this.torso.position.y = 0.42;
-    const t = part(box(0.46, 0.5, 0.28), faced(null, cloth, chest), 0.25);
-    this.torso.add(t);
+    this.torso.add(part(GEO.torso, faced(M.cloth, M.chest), 0.25));
     this.body.add(this.torso);
 
-    // head (pivot at neck)
     this.head = new THREE.Group(); this.head.position.y = 0.5;
     const hs = zombie ? 0.48 : 0.5;
-    this.head.add(part(box(hs, hs, hs), faced(null, skin, face), hs / 2));
+    this.head.add(part(zombie ? GEO.headZ : GEO.headH, faced(M.skin, M.face), hs / 2));
     if (!zombie) {
-      const cap = part(box(hs * 1.06, hs * 0.22, hs * 1.06), hair, hs + 0.02);
-      const back = part(box(hs * 1.06, hs * 0.86, hs * 0.18), hair, hs * 0.57);
+      const cap = part(box(hs * 1.06, hs * 0.22, hs * 1.06), M.hair, hs + 0.02);
+      const back = part(box(hs * 1.06, hs * 0.86, hs * 0.18), M.hair, hs * 0.57);
       back.position.z = -hs * 0.46;
       this.head.add(cap, back);
     }
     this.torso.add(this.head);
 
-    // arms (pivot at shoulder); rotation.x < 0 raises them forward
-    this.armL = new THREE.Group(); this.armL.position.set(0.31, 0.46, 0); // model faces +Z: its left is +X
+    // arms pivot at the shoulder; rotation.x < 0 raises them forward
+    this.armL = new THREE.Group(); this.armL.position.set(0.31, 0.46, 0);
     this.armR = new THREE.Group(); this.armR.position.set(-0.31, 0.46, 0);
-    const sleeve = zombie ? skin : cloth;
-    this.armL.add(part(box(0.15, 0.46, 0.16), sleeve, -0.2));
-    this.armR.add(part(box(0.15, 0.46, 0.16), sleeve, -0.2));
+    const sleeve = zombie ? M.skin : M.cloth;
+    this.armL.add(part(GEO.arm, sleeve, -0.2));
+    this.armR.add(part(GEO.arm, sleeve, -0.2));
     this.torso.add(this.armL, this.armR);
 
     if (!zombie) {
-      // stubby rifle held at the right hand
       const gunMat = toon(COL.ink, { hatch: false });
       const metal = toon(COL.stone, { mid: 0.7 });
       this.gun = new THREE.Group();
@@ -89,13 +105,25 @@ export class BlockMan {
       this.gun.add(this.muzzle);
     }
 
-    this.speed = zombie ? 0.9 + ((seed * 0.37) % 0.5) : 0;
+    this.meshes = [];
+    this.root.traverse((o) => { if (o.isMesh) { o.userData.mat = o.material; this.meshes.push(o); } });
+    this.speed = 1;
+    this.lean = 0.18;
+    this.fall = 0;          // 0 standing .. 1 flat on the ground
     this.pose(0);
   }
 
-  /** Advance the procedural pose. walk is 0..1 blend. */
+  /** Brief paper-white flash, the comic "hit" frame. */
+  flash(t = 0.07) {
+    this.flashT = t;
+    for (const m of this.meshes) m.material = FLASH;
+  }
+
   pose(dt, walk = 0) {
     this.t += dt;
+    if (this.flashT > 0 && (this.flashT -= dt) <= 0) {
+      for (const m of this.meshes) m.material = m.userData.mat;
+    }
     const t = this.t;
     if (this.kind === 'zombie') {
       const p = t * 4.2 * this.speed;
@@ -103,26 +131,33 @@ export class BlockMan {
       this.legL.rotation.x = s * 0.55;
       this.legR.rotation.x = -s * 0.55;
       // classic arms-out shamble: arms stay raised, only sway a little
-      this.armL.rotation.x = -1.35 + Math.sin(p + 0.6) * 0.12;
-      this.armR.rotation.x = -1.45 + Math.sin(p + 2.0) * 0.12;
+      this.armL.rotation.x = -1.35 + Math.sin(p + 0.6) * 0.12 - this.reach * 0.3;
+      this.armR.rotation.x = -1.45 + Math.sin(p + 2.0) * 0.12 - this.reach * 0.3;
       this.armL.rotation.z = -0.08;
       this.armR.rotation.z = 0.05;
-      this.torso.rotation.x = 0.18;
+      this.torso.rotation.x = this.lean + this.reach * 0.25;
       this.torso.rotation.z = Math.sin(p * 0.5) * 0.08;
       this.head.rotation.z = 0.22 + Math.sin(p * 0.5 + 1) * 0.06;
       this.head.rotation.x = 0.1;
       this.body.position.y = Math.abs(Math.cos(p)) * 0.05 * walk;
+      // topple backwards from the feet
+      this.root.rotation.x = -this.fall * Math.PI / 2;
+      this.body.position.y += this.fall * 0.15;
     } else {
       const p = t * 9;
       const s = Math.sin(p) * walk;
       this.legL.rotation.x = s * 0.7;
       this.legR.rotation.x = -s * 0.7;
+      this.recoil = Math.max(0, this.recoil - dt * 12);
       // shouldered rifle: right arm points forward, left arm braces the barrel
-      this.armR.rotation.set(-1.2, 0, 0.08);
-      this.armL.rotation.set(-1.0, 0, -0.85);
+      this.armR.rotation.set(-1.2 - this.recoil * 0.25, 0, 0.08);
+      this.armL.rotation.set(-1.0 - this.recoil * 0.2, 0, -0.85);
+      this.gun.position.z = 0.1 - this.recoil * 0.06;
       this.torso.rotation.y = -0.12;
+      this.torso.rotation.x = -this.recoil * 0.04;
       this.head.rotation.y = 0.12;
       this.body.position.y = Math.abs(Math.cos(p)) * 0.06 * walk + Math.sin(t * 2) * 0.008;
     }
   }
 }
+BlockMan.prototype.reach = 0;

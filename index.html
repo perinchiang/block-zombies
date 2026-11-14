@@ -4,19 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#efe6d1" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
     <link rel="icon" href="data:," />
-    <title>方块尸潮 · 画风样张</title>
+    <title>方块尸潮</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <canvas id="gl"></canvas>
-    <div id="hud">
-      <div class="hp"><span></span><span></span><span></span><span></span><span class="off"></span></div>
-      <div class="wave">第 1 波</div>
-      <div class="ammo"><b>24</b>/120</div>
+    <div id="hurt"></div>
+    <div id="hud" hidden>
+      <div class="hp"></div>
+      <div class="clock">1:00</div>
+      <div class="kills"><b>0</b> 击倒</div>
+      <div class="ammo"><b>24</b>/24</div>
+      <div class="reload" hidden>换弹…</div>
+      <div class="cross"></div>
+      <div class="hint">左边按住移动 · 右边拖动转身 · 按住开火</div>
       <div class="stick"><div class="knob"></div></div>
       <div class="fire">开火</div>
     </div>
+    <div id="panel" hidden></div>
     <div id="rotate" hidden>请把手机横过来</div>
     <script type="module" src="/src/main.js"></script>
   </body>

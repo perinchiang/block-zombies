@@ -19,8 +19,13 @@ function rand(seed) {
   return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
 }
 
+// Street bounds the hero and zombies may stand in (building faces sit at |x|=7).
+export const BOUNDS = { x: 6.6, zMin: -62, zMax: 9 };
+
 export function buildArena(scene) {
   const g = new THREE.Group();
+  const colliders = []; // circles on the ground plane: { x, z, r }
+  const solid = (x, z, r) => colliders.push({ x, z, r });
   const M = {
     ground: toon(COL.paper, { hatch: false }),
     road: toon(COL.asphalt, { hatch: false }),
@@ -103,17 +108,19 @@ export function buildArena(scene) {
   car.position.set(2.0, 0, -9);
   car.rotation.y = 0.35;
   g.add(car);
+  for (const lz of [-1.3, 0, 1.3]) solid(2.0 + Math.sin(0.35) * lz, -9 + Math.cos(0.35) * lz, 1.0);
 
   const barrel = (x, z, tip = false) => {
     const b = mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.9, 16), M.rust, x, tip ? 0.32 : 0.45, z);
     if (tip) { b.rotation.z = Math.PI / 2; b.rotation.y = 0.6; }
     g.add(b);
+    solid(x, z, tip ? 0.55 : 0.4);
     const band = mesh(new THREE.CylinderGeometry(0.335, 0.335, 0.08, 16), M.ink, 0, 0.18, 0, { shadow: false });
     b.add(band);
   };
   barrel(-2.6, -4.5); barrel(-2.0, -5.1); barrel(-3.1, -13, true);
 
-  const crate = (x, z, s = 0.8, ry = 0) => g.add(mesh(B(s, s, s), M.wallAlt, x, s / 2, z, { ry }));
+  const crate = (x, z, s = 0.8, ry = 0) => { g.add(mesh(B(s, s, s), M.wallAlt, x, s / 2, z, { ry })); solid(x, z, s * 0.7); };
   crate(2.9, -3.2, 0.8, 0.3); crate(3.1, -2.3, 0.6, -0.2); crate(2.95, -3.2 + 0.05, 0.5, 0.9);
   g.children.at(-1).position.y = 1.05;
 
@@ -125,17 +132,20 @@ export function buildArena(scene) {
   bar.position.set(-1.6, 0, -16);
   bar.rotation.y = -0.2;
   g.add(bar);
+  for (const lx of [-0.9, 0, 0.9]) solid(-1.6 + Math.cos(-0.2) * lx, -16 - Math.sin(-0.2) * lx, 0.35);
 
   for (const [x, z] of [[-4.2, -2], [4.2, -12], [-4.2, -24], [4.2, -36]]) {
     g.add(mesh(new THREE.CylinderGeometry(0.07, 0.09, 4.2, 8), M.ink, x, 2.1, z));
+    solid(x, z, 0.15);
     const arm = mesh(B(1.0, 0.08, 0.08), M.ink, x - Math.sign(x) * 0.45, 4.15, z);
     g.add(arm);
     g.add(mesh(B(0.36, 0.14, 0.24), M.stone, x - Math.sign(x) * 0.9, 4.05, z));
   }
   g.add(mesh(new THREE.CylinderGeometry(0.3, 0.26, 0.85, 12), M.stone, 4.4, 0.43, -6.5));
+  solid(4.4, -6.5, 0.35);
 
   scene.add(g);
-  return g;
+  return { group: g, colliders };
 }
 
 /** Irregular splat lying on the ground. */

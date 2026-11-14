@@ -2,7 +2,7 @@
 
 方块小人越肩视角打僵尸，手机横屏优先。画面全部由代码生成：没有图片、模型或音频文件。
 
-当前阶段：**第一天 · 画风样张**。只有场景、主角、僵尸和界面占位，还不能玩。
+当前阶段：**第二天 · 60 秒一局**。能操作、能打完一局；画风已锁定（排线阴影）。
 
 在线预览：https://perinchiang.github.io/block-zombies/ （推送到 main 后由 GitHub Actions 自动部署）
 
@@ -13,11 +13,21 @@ npm install
 npm run dev          # http://localhost:5191 ，同一 Wi-Fi 的手机可用局域网地址打开
 ```
 
+操作：
+
+- 手机横屏：左半屏按住即出现摇杆（移动）；右半屏拖动转身；按住开火键连射，按住时拖动也能转身。
+- 电脑：WASD / 方向键移动，点击画面锁定鼠标后用鼠标转身，左键或空格开火，Q/E 也能转身。
+
 调试参数：
 
+- `?skip` 跳过开始面板
+- `?auto` 机器人自动打一局（熟练）；`?auto=weak` 手残档；`?speed=2` 加速
+- `?fps` 显示帧时间和僵尸数量
 - `?still` 定格画面（截图用）
 - `?shade=flat` 阴影改为纯墨块、不排线（未选用的对比方案 B）
 - `?cam=x,y,z&look=x,y,z` 试镜头（相对主角的偏移）
+
+触控测试：`node tools/touch-test.mjs`（左手推摇杆 + 右手按住开火拖动，需先开 dev server）。
 
 截图：`node tools/shot.mjs "?still" shots/a.png --w=844 --h=390 --dpr=2 --mobile`（需要先开 dev server）。
 
