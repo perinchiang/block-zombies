@@ -73,7 +73,7 @@ const round = new Round({
 const input = new Input(canvas, { stick: document.querySelector('.stick'), knob: document.querySelector('.knob'), fire: document.querySelector('.fire') });
 
 // Over-the-shoulder rig, in hero space: right, up, back.
-const CAM_OFF = vec(params.get('cam'), new THREE.Vector3(1.35, 2.55, 3.7));
+const CAM_OFF = vec(params.get('cam'), new THREE.Vector3(1.15, 1.65, 5.2));
 const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 120);
 scene.add(camera);
 const ink = new InkLine(renderer);
@@ -233,9 +233,10 @@ function updateCamera() {
   const hp = round.hero.root.position;
   _f.set(Math.sin(round.yaw), 0, Math.cos(round.yaw));
   _r.set(-Math.cos(round.yaw), 0, Math.sin(round.yaw));
-  // Orbit around shoulder height. Pitch rotates both the view and the rig;
-  // ground/wall clearance keeps extreme angles outside the scenery.
-  const pivot = hp.clone().setY(1.25);
+  // Orbit around the lower torso so the whole hero fits below the sight.
+  // Keep the rig low and far enough back to show the feet at normal aim angles;
+  // ground/wall clearance still keeps extreme angles outside the scenery.
+  const pivot = hp.clone().setY(0.65);
   const offset = _r.clone().multiplyScalar(CAM_OFF.x).addScaledVector(_f, -CAM_OFF.z).setY(CAM_OFF.y - pivot.y);
   offset.applyAxisAngle(_r, round.pitch);
   const want = pivot.clone().add(offset);
