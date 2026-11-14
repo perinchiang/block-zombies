@@ -36,7 +36,6 @@ html, body {
 .cross::before { left: 11px; top: 0; width: 4px; height: 26px; }
 .cross::after { top: 11px; left: 0; height: 4px; width: 26px; }
 .cross.lock::before, .cross.lock::after { background: var(--blood); }
-.cross.lock { transform: rotate(45deg) scale(0.85); }
 .hint { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); font-size: 14px; padding: 2px 10px; background: var(--paper); border: 2px solid var(--ink); white-space: nowrap; transition: opacity 0.6s; }
 .hint.gone { opacity: 0; }
 .stick {
@@ -51,7 +50,24 @@ html, body {
   border: 3px solid var(--ink); box-shadow: 4px 4px 0 var(--ink);
 }
 .fire.down { transform: translate(3px, 3px); box-shadow: 1px 1px 0 var(--ink); }
-@media (hover: hover) and (pointer: fine) { .stick, .fire { display: none; } }
+.turn {
+  position: absolute; right: calc(150px + var(--safe-r)); bottom: 108px; width: 58px; height: 58px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 15px; color: var(--ink); background: var(--paper);
+  border: 3px solid var(--ink); box-shadow: 3px 3px 0 var(--ink);
+}
+.turn.down { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
+/* threat arrows: red ink wedges on the screen edge, pointing toward the zombie */
+.threats { position: absolute; inset: 0; }
+.threat { position: absolute; left: 0; top: 0; width: 0; height: 0; transition: opacity 0.15s; }
+.threat::before {
+  content: ""; position: absolute; left: -16px; top: -22px; width: 32px; height: 34px; background: var(--blood);
+  clip-path: polygon(50% 0, 100% 100%, 50% 78%, 0 100%); filter: drop-shadow(0 0 0 var(--ink));
+}
+.threat::after {
+  content: ""; position: absolute; left: -20px; top: -27px; width: 40px; height: 42px; background: var(--ink); z-index: -1;
+  clip-path: polygon(50% 0, 100% 100%, 50% 80%, 0 100%);
+}
+@media (hover: hover) and (pointer: fine) { .stick, .fire, .turn { display: none; } }
 
 #hurt { position: fixed; inset: 0; pointer-events: none; opacity: 0; box-shadow: inset 0 0 0 14px var(--blood), inset 0 0 90px 30px rgba(196, 50, 43, 0.55); }
 

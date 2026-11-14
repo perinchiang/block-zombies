@@ -13,7 +13,10 @@ export const TUNE = {
   mag: 24,
   reload: 1.25,
   range: 24,
-  assistAngle: 0.16,     // radians of aim assist cone (~9°)
+  assistAngle: 0.16,     // radians of aim assist cone (~9°), only used when the barrel line is empty
+  pointBlank: 1.6,       // metres: a zombie this close in front always takes the shot
+  pointBlankCone: 0.55,  // radians either side of facing (~60° fan)
+  turnSpeed: 16,         // radians per second for the quick 180° turn
   zombieHp: 3,
   runnerHp: 2,
   walkSpeed: [1.05, 1.45],
@@ -53,8 +56,7 @@ export class Round {
       scene.add(z.root);
       return z;
     });
-    this.aim = new THREE.Vector3(0, 0, -1);
-    this.target = null;
+    this.aimInfo = { zombie: null, point: new THREE.Vector3(), blocked: false };
     this.state = 'idle';
     this.reset();
   }
@@ -78,6 +80,8 @@ export class Round {
     this.groanT = 1.5;
     this.maxAlive = 0;
     this.heroFall = 0;
+    this.turnLeft = 0;
+    this.aimInfo.zombie = null;
     this.heroKick = new THREE.Vector3();
     for (const z of this.pool) this.retire(z);
     this.fx.clearDecals();
@@ -159,22 +163,85 @@ export class Round {
   // ---- shooting --------------------------------------------------------------
   chest(z, out) { return out.copy(z.root.position).setY(z.runner ? 0.85 : 0.95); }
 
-  /** Pick the zombie closest to the aim line inside the assist cone. */
-  pickTarget() {
+  targetable(z) { return z.active && !z.dead && z.rise >= 0.6; }
+
+  /**
+   * Trace a flat ray from (ox, oz) along (dx, dz). Returns the first zombie it
+   * would hit before any solid prop, the distance travelled, and (for piercing
+   * shots) every zombie on the way.
+   */
+  trace(ox, oz, dx, dz, pierce = false) {
+    let stop = TUNE.range;
+    for (const c of this.colliders) {
+      if (c.r < 0.3) continue;              // lamp posts and thin poles don't stop bullets
+      const t = (c.x - ox) * dx + (c.z - oz) * dz;
+      if (t < 0 || t > stop) continue;
+      const px = ox + dx * t - c.x, pz = oz + dz * t - c.z;
+      if (px * px + pz * pz < c.r * c.r * 0.8) stop = t;
+    }
+    const out = this._trace || (this._trace = { zombie: null, dist: 0, list: [] });
+    out.zombie = null; out.dist = stop; out.list.length = 0;
+    for (const z of this.pool) {
+      if (!z.active || z.dead || z.rise < 0.5) continue;
+      const t = (z.root.position.x - ox) * dx + (z.root.position.z - oz) * dz;
+      if (t < -0.2 || t > stop) continue;
+      const px = ox + dx * t - z.root.position.x, pz = oz + dz * t - z.root.position.z;
+      if (px * px + pz * pz < 0.38 * 0.38) out.list.push({ z, t });
+    }
+    out.list.sort((a, b) => a.t - b.t);
+    if (out.list.length) {
+      out.zombie = out.list[0].z;
+      if (!pierce) out.dist = Math.max(0, out.list[0].t);
+    }
+    return out;
+  }
+
+  /**
+   * Decide where the next shot goes, in threat order:
+   *  1. point-blank: anything right in our face,
+   *  2. whatever the straight barrel line already hits,
+   *  3. assist toward the NEAREST zombie in a narrow cone (never a far one
+   *     past a near one), only if nothing is on the barrel line.
+   * The crosshair is drawn at aim.point, so what you see is what you hit.
+   */
+  resolveAim() {
     const h = this.hero.root.position;
     const f = this.forward(_c);
-    let best = null, bestA = TUNE.assistAngle;
+    const aim = this.aimInfo;
+    let best = null, bestD = TUNE.pointBlank;
+    const cosPB = Math.cos(TUNE.pointBlankCone);
     for (const z of this.pool) {
-      if (!z.active || z.dead || z.rise < 0.6) continue;
-      const dx = z.root.position.x - h.x, dz = z.root.position.z - h.z;
-      const d = Math.hypot(dx, dz);
-      if (d > TUNE.range || d < 0.2) continue;
-      const a = Math.acos(THREE.MathUtils.clamp((dx * f.x + dz * f.z) / d, -1, 1));
-      // closer zombies get a slightly wider cone: they are the threat
-      const cone = bestA * (d < 4 ? 1.8 : 1);
-      if (a < cone) { best = z; bestA = Math.min(a, TUNE.assistAngle); }
+      if (!this.targetable(z)) continue;
+      const dx = z.root.position.x - h.x, dz = z.root.position.z - h.z, d = Math.hypot(dx, dz);
+      if (d < bestD && (dx * f.x + dz * f.z) / Math.max(d, 1e-4) > cosPB) { best = z; bestD = d; }
     }
-    return best;
+    if (!best) {
+      const line = this.trace(h.x, h.z, f.x, f.z);
+      if (line.zombie) best = line.zombie;
+      else {
+        let bd = TUNE.range;
+        for (const z of this.pool) {
+          if (!this.targetable(z)) continue;
+          const dx = z.root.position.x - h.x, dz = z.root.position.z - h.z, d = Math.hypot(dx, dz);
+          if (d >= bd || d < 0.2) continue;
+          const a = Math.acos(THREE.MathUtils.clamp((dx * f.x + dz * f.z) / d, -1, 1));
+          if (a > TUNE.assistAngle * (d < 5 ? 1.6 : 1)) continue;
+          // line of sight: if another zombie stands in the way, that one is the target
+          const los = this.trace(h.x, h.z, dx / d, dz / d);
+          if (los.zombie) { best = los.zombie; bd = d; }
+        }
+        if (!best) {
+          aim.zombie = null;
+          aim.point.set(h.x + f.x * line.dist, 1.0, h.z + f.z * line.dist);
+          aim.blocked = line.dist < TUNE.range;
+          return aim;
+        }
+      }
+    }
+    aim.zombie = best;
+    aim.blocked = false;
+    this.chest(best, aim.point);
+    return aim;
   }
 
   fire(camera) {
@@ -186,26 +253,14 @@ export class Round {
     const muzzle = h.muzzle.getWorldPosition(new THREE.Vector3());
     const origin = new THREE.Vector3(h.root.position.x, 1.0, h.root.position.z);
     const dir = this.forward(new THREE.Vector3());
-    if (this.target) dir.subVectors(this.chest(this.target, _a), origin).normalize();
-    // tiny spread so streams of fire read as hand-held
-    dir.x += (Math.random() - 0.5) * 0.02; dir.z += (Math.random() - 0.5) * 0.02; dir.normalize();
+    const aim = this.aimInfo;
+    if (aim.zombie) { dir.set(aim.point.x - origin.x, 0, aim.point.z - origin.z); if (dir.lengthSq() > 1e-6) dir.normalize(); else this.forward(dir); }
+    // tiny spread so streams of fire read as hand-held (none at point-blank)
+    const spread = aim.zombie && origin.distanceTo(aim.point) < TUNE.pointBlank ? 0 : 0.02;
+    dir.x += (Math.random() - 0.5) * spread; dir.z += (Math.random() - 0.5) * spread; dir.normalize();
 
-    // hitscan against zombie cylinders, stopped by solid props
-    let hitZ = null, hitD = TUNE.range;
-    for (const z of this.pool) {
-      if (!z.active || z.dead || z.rise < 0.5) continue;
-      const t = (z.root.position.x - origin.x) * dir.x + (z.root.position.z - origin.z) * dir.z;
-      if (t < 0 || t > hitD) continue;
-      const px = origin.x + dir.x * t - z.root.position.x, pz = origin.z + dir.z * t - z.root.position.z;
-      if (px * px + pz * pz < 0.38 * 0.38) { hitZ = z; hitD = t; }
-    }
-    for (const c of this.colliders) {
-      if (c.r < 0.3) continue;
-      const t = (c.x - origin.x) * dir.x + (c.z - origin.z) * dir.z;
-      if (t < 0 || t > hitD) continue;
-      const px = origin.x + dir.x * t - c.x, pz = origin.z + dir.z * t - c.z;
-      if (px * px + pz * pz < c.r * c.r * 0.8) { hitZ = null; hitD = t; }
-    }
+    const tr = this.trace(origin.x, origin.z, dir.x, dir.z);
+    const hitZ = tr.zombie, hitD = tr.dist;
     const end = origin.clone().addScaledVector(dir, hitD);
     end.y = hitZ ? (hitZ.runner ? 0.85 : 0.95) : 1.0 + dir.y * hitD;
     this.fx.muzzle(muzzle, camera);
@@ -248,7 +303,13 @@ export class Round {
       this.elapsed += dt;
       this.time = Math.max(0, TUNE.length - this.elapsed);
       this.yaw += input.turn;
-      this.target = this.pickTarget();
+      if (input.quickTurn && this.turnLeft <= 0) this.turnLeft = Math.PI;
+      if (this.turnLeft > 0) {
+        const step = Math.min(this.turnLeft, TUNE.turnSpeed * dt);
+        this.yaw += step;
+        this.turnLeft -= step;
+      }
+      this.resolveAim();
 
       // move relative to facing
       const f = this.forward(_a).clone(), r = this.right(_b).clone();
@@ -382,3 +443,6 @@ export class Round {
     this.hooks.end?.(win, { kills: this.kills, shots: this.shots, hits: this.hits, time: this.elapsed, hp: this.hp });
   }
 }
+
+// HUD and older callers read round.target.
+Object.defineProperty(Round.prototype, 'target', { get() { return this.aimInfo.zombie; } });
