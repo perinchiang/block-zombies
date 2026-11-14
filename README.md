@@ -37,4 +37,4 @@ npm run dev          # http://localhost:5191 ，同一 Wi-Fi 的手机可用局�
 - 画风：强线条漫画风。纸白底、统一粗细的黑描边、两三层平涂、黑色硬阴影。不做中国风，不做水墨晕染。
 - 技术：Vite + three.js，先验证手机网页版，之后再考虑上 TapTap。
 
-详见 `docs/style.md`。
+详见 `docs/GAME_DESIGN.md`（目标形态与开发顺序）、`docs/style.md`（画风规则）、`docs/round.md`（当前原型的规则与数值）。
