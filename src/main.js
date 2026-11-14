@@ -66,11 +66,11 @@ const round = new Round({
   },
 });
 
-const input = new Input(canvas, { stick: document.querySelector('.stick'), knob: document.querySelector('.knob'), fire: document.querySelector('.fire') });
+const input = new Input(canvas, { stick: document.querySelector('.stick'), knob: document.querySelector('.knob'), fire: document.querySelector('.fire'), turn: document.querySelector('.turn') });
 
 // over-the-shoulder rig, in hero space: right, up, back / right, up, forward
-const CAM_OFF = vec(params.get('cam'), new THREE.Vector3(1.3, 2.5, 3.9));
-const LOOK_OFF = vec(params.get('look'), new THREE.Vector3(1.0, 0.95, 6));
+const CAM_OFF = vec(params.get('cam'), new THREE.Vector3(1.35, 2.55, 3.7));
+const LOOK_OFF = vec(params.get('look'), new THREE.Vector3(0.75, 0.55, 4.2));
 const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 120);
 scene.add(camera);
 const ink = new InkLine(renderer);
@@ -135,6 +135,26 @@ function autopilot(dt) {
   return { move: { x: bot.strafe * 0.6, y: nd < 4.5 ? -1 : nd > 9 ? 0.4 : -0.2 }, turn, firing: Math.abs(d) < 0.25 };
 }
 
+// Zombies close by but outside the view: shown as red ink arrows on the edge.
+const _threats = [];
+function threatsAround() {
+  _threats.length = 0;
+  if (round.state !== 'play') return _threats;
+  const hp = round.hero.root.position;
+  const fx_ = Math.sin(round.yaw), fz = Math.cos(round.yaw);
+  for (const z of round.pool) {
+    if (!round.targetable(z)) continue;
+    const dx = z.root.position.x - hp.x, dz = z.root.position.z - hp.z, d = Math.hypot(dx, dz);
+    if (d > 9) continue;
+    const ly = dx * fx_ + dz * fz, lx = -dx * fz + dz * fx_; // forward / right components
+    const a = Math.atan2(lx, ly);                              // 0 ahead, + to the right
+    if (Math.abs(a) < 0.95) continue;                          // already on screen
+    _threats.push({ a, d });
+  }
+  _threats.sort((p, q) => p.d - q.d);
+  return _threats;
+}
+
 // ---- frame
 const _f = new THREE.Vector3(), _r = new THREE.Vector3(), _v = new THREE.Vector3();
 const fpsEl = params.has('fps') ? Object.assign(document.body.appendChild(document.createElement('div')), { style: 'position:fixed;left:6px;bottom:4px;font:12px monospace;color:#1d1b21;z-index:9' }) : null;
@@ -179,9 +199,10 @@ function frame(now) {
   sun.target.position.copy(hp);
 
   // crosshair: where the aim line meets the street ahead
-  const aimAt = round.target ? round.chest(round.target, _v) : _v.copy(hp).addScaledVector(_f, 12).setY(1.0);
-  aimAt.project(camera);
+  // crosshair sits exactly where the next bullet lands
+  const aimAt = _v.copy(round.aimInfo.point).project(camera);
   hud.update(round, raw, { x: (aimAt.x + 1) * 0.5 * W, y: (1 - aimAt.y) * 0.5 * H });
+  hud.threats(threatsAround(), W, H);
 
   ink.render(scene, camera, scene.fog);
   if (++frames === 3) window.__ready = true;
