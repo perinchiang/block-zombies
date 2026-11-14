@@ -40,7 +40,7 @@ export const TUNE = {
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3();
 
 export class Round {
-  constructor({ scene, colliders, scenery = [], fx, sfx, hooks }) {
+  constructor({ scene, colliders, scenery = [], fx, sfx, hooks, profile = null }) {
     this.scene = scene;
     this.colliders = colliders;
     this.fx = fx;
@@ -62,7 +62,8 @@ export class Round {
     this.extraction = new Extraction(scene);
     this.crates = this.extraction.crates;
     this.evac = this.extraction.evac;
-    this.bank = 0; // Session-only; persistent economy belongs to M3.
+    this.profile = profile;
+    this.bank = profile?.coins ?? 0;
     this.buffs = new Buffs(scene);
     this.buffTimers = this.buffs.timers;
     this.aimInfo = { zombie: null, point: new THREE.Vector3(), blocked: false };
@@ -71,7 +72,9 @@ export class Round {
     this.reset();
   }
 
-  reset(weaponId = this.weapon.id) {
+  reset(weaponId = this.weapon.id, { trial = false } = {}) {
+    this.trial = trial;
+    if (this.profile) this.bank = this.profile.coins;
     this.weapon = WEAPONS[weaponId] ?? WEAPONS.rifle;
     const h = this.hero;
     h.setWeapon(this.weapon.id);
@@ -441,10 +444,13 @@ export class Round {
     if (win) {
       this.sfx.win();
     }
-    const carried = win ? this.loot : Math.floor(this.loot * 0.25);
-    this.bank += carried;
+    const carried = this.trial ? 0 : win ? this.loot : Math.floor(this.loot * 0.25);
+    if (this.profile) {
+      if (!this.trial) this.profile.earn(carried);
+      this.bank = this.profile.coins;
+    } else this.bank += carried;
     this.hooks.end?.(win, { kills: this.kills, shots: this.shots, hits: this.hits, time: this.elapsed, hp: this.hp,
-      loot: this.loot, carried, bank: this.bank, opened: this.opened, weapon: this.weapon.id,
+      loot: this.loot, carried, bank: this.bank, opened: this.opened, weapon: this.weapon.id, trial: this.trial,
       reason: win ? 'evacuated' : this.missed ? 'missed' : 'dead' });
   }
 }

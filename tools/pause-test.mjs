@@ -104,7 +104,9 @@ try {
   await page.evaluate(() => window.__game.begin());
   assert.equal(await page.locator('.tutorial').count(), 0, 'retry does not repeat tutorial');
   await page.reload(); await ready(page);
-  assert.equal(await page.locator('.tutorial').count(), 0, 'refresh does not repeat tutorial');
+  await page.getByRole('button', { name: '进入街道' }).waitFor();
+  assert.equal(await page.locator('.tutorial').count(), 0, 'refresh returns to the shop without repeating tutorial');
+  assert.equal(await page.locator('.weapon-choice[data-weapon="rifle"]').getAttribute('aria-pressed'), 'true');
   console.log('PASS first-visit tutorial stays dismissed across retry and refresh');
   await ctx.close();
 

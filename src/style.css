@@ -54,7 +54,7 @@ html, body {
   border: 2px solid var(--ink); cursor: pointer; pointer-events: auto; touch-action: manipulation;
 }
 .pause:active { transform: translateY(2px); }
-.pause:focus-visible, .btn:focus-visible, .weapon-choice:focus-visible { outline: 3px solid var(--hero); outline-offset: 3px; }
+.pause:focus-visible, .btn:focus-visible, .weapon-choice:focus-visible, .shop-buy:focus-visible, .shop-trial:focus-visible { outline: 3px solid var(--hero); outline-offset: 3px; }
 /* threat arrows: red ink wedges on the screen edge, pointing toward the zombie */
 .threats { position: absolute; inset: 0; }
 .threat { position: absolute; left: 0; top: 0; width: 0; height: 0; transition: opacity 0.15s; }
@@ -90,6 +90,33 @@ html, body {
 .weapon-choice strong { display: block; font-size: 16px; }
 .weapon-choice span { display: block; white-space: nowrap; }
 .weapon-choice[aria-pressed="true"] { background: var(--ink); color: var(--paper); box-shadow: inset 0 -3px 0 var(--hero); }
+.shop-card { width: 640px; padding: 16px 20px; transform: none; }
+.shop-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.shop-card h1 { font-size: 36px; }
+.shop-card .wallet { margin: 0; padding: 4px 8px; border: 2px solid var(--ink); background: var(--hero); font-size: 14px; white-space: nowrap; }
+.wallet b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.shop-card .tutorial { text-align: left; font-size: 12px; line-height: 1.5; margin-top: 8px; }
+.shop-card .weapon-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.weapon-product { min-width: 0; padding: 10px; border: 3px solid var(--ink); box-shadow: 3px 3px 0 var(--ink); text-align: left; }
+.weapon-product h2 { margin: 0; font-size: 20px; }
+.card .weapon-product p { margin-top: 4px; font-size: 12px; line-height: 1.4; }
+.card .weapon-product .weapon-price { font-weight: 900; }
+.shop-actions { display: flex; gap: 6px; margin-top: 8px; }
+.weapon-product button { min-height: 44px; padding: 5px 8px; border: 2px solid var(--ink); font: 900 13px var(--font); cursor: pointer; touch-action: manipulation; }
+.weapon-product .weapon-choice { display: block; width: 100%; margin-top: 8px; }
+.shop-buy { flex: 1; background: var(--hero); color: var(--ink); }
+.shop-buy:disabled { cursor: default; background: transparent; opacity: 0.6; }
+.shop-trial { background: var(--paper); color: var(--blood); }
+.card .trial-note { margin-top: 8px; font-size: 12px; font-weight: 900; line-height: 1.5; }
+.shop-card .btn { margin-top: 10px; min-height: 44px; }
+@media (max-width: 420px) {
+  .shop-card { padding: 12px; }
+  .shop-card h1 { font-size: 30px; }
+  .shop-heading { justify-content: center; }
+  .shop-card .weapon-choices { gap: 8px; }
+  .weapon-product { padding: 7px; }
+  .shop-actions { flex-direction: column; }
+}
 /* Only show action progress while searching a crate or standing in the exit. */
 .interaction { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); width: 100px; padding: 4px; background: var(--paper); border: 2px solid var(--ink); }
 .interaction progress { display: block; width: 100%; height: 7px; accent-color: var(--hero); }
@@ -115,5 +142,13 @@ html, body {
   .btn { margin-top: 12px; font-size: 20px; padding: 5px 24px; }
   .weapon-choices { margin-top: 8px; }
   .weapon-choice { min-height: 50px; padding: 4px 8px; }
+  .shop-card { padding: 10px 16px; }
+  .shop-card h1 { font-size: 30px; }
+  .shop-card .tutorial { font-size: 11px; line-height: 1.4; margin-top: 6px; }
+  .shop-card .weapon-choices { margin-top: 6px; }
+  .weapon-product { padding: 6px 8px; }
+  .weapon-product h2 { font-size: 17px; }
+  .weapon-product .weapon-choice { min-height: 44px; }
+  .shop-card .btn { margin-top: 6px; font-size: 18px; }
 }
 #rotate { position: fixed; inset: 0; display: grid; place-items: center; background: var(--paper); color: var(--ink); font: 900 22px var(--font); }
