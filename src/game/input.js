@@ -8,6 +8,7 @@ export class Input {
   constructor(el, { stick, knob, fire }) {
     this.move = { x: 0, y: 0 };   // x right, y forward, length <= 1
     this.turn = 0;                // accumulated yaw delta in radians, consumed per frame
+    this.pitch = 0;
     this.firing = false;
     this.enabled = true;
     this.stickEl = stick; this.knobEl = knob; this.fireEl = fire;
@@ -34,7 +35,10 @@ export class Input {
     });
     window.addEventListener('mouseup', () => (this.mouseFire = false));
     window.addEventListener('mousemove', (e) => {
-      if (document.pointerLockElement === el && this.enabled) this.turn -= e.movementX * 0.0025;
+      if (document.pointerLockElement === el && this.enabled) {
+        this.turn -= e.movementX * 0.0025;
+        this.pitch -= e.movementY * 0.0025;
+      }
     });
     this.el = el;
   }
@@ -62,7 +66,10 @@ export class Input {
     for (const t of e.changedTouches) {
       const s = this.touches.get(t.identifier);
       if (!s) continue;
-      if (s.role === 'look' || s.role === 'fire') this.turn -= (t.clientX - s.x) * this.sens;
+      if (s.role === 'look' || s.role === 'fire') {
+        this.turn -= (t.clientX - s.x) * this.sens;
+        this.pitch -= (t.clientY - s.y) * this.sens;
+      }
       s.x = t.clientX; s.y = t.clientY;
     }
     this.sync();
@@ -113,7 +120,7 @@ export class Input {
 
   /** Read the frame's input. Returns { move, turn, firing }. */
   read() {
-    if (!this.enabled) { this.turn = 0; return { move: { x: 0, y: 0 }, turn: 0, firing: false }; }
+    if (!this.enabled) { this.turn = this.pitch = 0; return { move: { x: 0, y: 0 }, turn: 0, pitch: 0, firing: false }; }
     const k = this.keys;
     let x = 0, y = 0;
     if (k.has('KeyA') || k.has('ArrowLeft')) x -= 1;
@@ -124,16 +131,16 @@ export class Input {
     if (k.has('KeyE')) this.turn -= 0.04;
     const l = Math.hypot(x, y);
     const move = this.touchMove ?? (l ? { x: x / l, y: y / l } : { x: 0, y: 0 });
-    const turn = this.turn;
-    this.turn = 0;
-    return { move, turn, firing: !!this.touchFire || this.mouseFire || k.has('Space') };
+    const turn = this.turn, pitch = this.pitch;
+    this.turn = this.pitch = 0;
+    return { move, turn, pitch, firing: !!this.touchFire || this.mouseFire || k.has('Space') };
   }
 
   reset() {
     this.touches.clear();
     this.keys.clear();
     this.mouseFire = false;
-    this.turn = 0;
+    this.turn = this.pitch = 0;
     this.fireEl.classList.remove('down');
     this.sync();
   }

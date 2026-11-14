@@ -16,7 +16,8 @@ const state = page => page.evaluate(() => {
     shots: R.shots, ammo: R.ammo, reload: R.reloadT, spawn: R.spawnT,
     position: R.hero.root.position.toArray(), yaw: R.yaw, extracting: R.extracting,
     buffs: { ...R.buffTimers }, loot: R.loot,
-    crates: R.crates.map(c => [c.progress, c.opened]),
+    crates: R.crates.map(c => c.opened),
+    bullets: R.ballistics.active.map(p => [p.position.toArray(), p.remaining, p.travelled]),
     zombies: R.pool.map(z => [z.active, z.dead, z.biteT, z.root.position.toArray()]),
   };
 });
@@ -69,7 +70,7 @@ try {
   await page.keyboard.up('KeyW'); await page.keyboard.up('Space');
   console.log('PASS mobile pause freezes combat, clocks, buffs and clears held inputs');
 
-  // Action progress also freezes when the panel opens mid-search/mid-evacuation.
+  // Automatic crate collection and evacuation both respect pause.
   for (const kind of ['crate', 'evac']) {
     await page.evaluate(kind => {
       window.__game.begin();
@@ -77,18 +78,28 @@ try {
       R.pool.forEach(z => R.retire(z)); R.spawnT = 999;
       if (kind === 'crate') {
         const c = R.crates[0]; R.hero.root.position.set(c.x, 0, c.z + 1);
+        R.state = 'paused';
       } else {
         R.elapsed = 100; R.hero.root.position.set(R.evac.x, 0, R.evac.z);
       }
     }, kind);
-    await page.waitForFunction(kind => kind === 'crate' ? window.__game.round.crates[0].progress > 0 : window.__game.round.extracting > 0, kind);
-    await page.getByRole('button', { name: '暂停', exact: true }).tap();
+    if (kind === 'evac') {
+      await page.waitForFunction(() => window.__game.round.extracting > 0);
+      await page.getByRole('button', { name: '暂停', exact: true }).tap();
+    }
     const before = await state(page);
     await page.waitForTimeout(400);
-    assert.deepEqual(await state(page), before, `${kind} progress freezes`);
-    await page.getByRole('button', { name: '继续游戏' }).tap();
+    assert.deepEqual(await state(page), before, `${kind} stays frozen`);
+    if (kind === 'crate') {
+      assert.equal(before.crates[0], false, 'paused crate is not collected');
+      await page.evaluate(() => {
+        const R = window.__game.round;
+        R.state = 'play'; R.extraction.update(R, 0.001, { move: { x: 0, y: 0 }, firing: false });
+      });
+      assert.equal((await state(page)).crates[0], true, 'crate collects on the first active update');
+    } else await page.getByRole('button', { name: '继续游戏' }).tap();
   }
-  console.log('PASS search and evacuation pause without losing progress');
+  console.log('PASS automatic crate pickup and evacuation respect pause');
 
   await page.evaluate(() => window.__game.begin());
   assert.equal(await page.locator('.tutorial').count(), 0, 'retry does not repeat tutorial');
