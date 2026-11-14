@@ -1,0 +1,43 @@
+import { chromium } from 'playwright-core';
+import assert from 'node:assert/strict';
+const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+try {
+  const page = await browser.newPage({ viewport: { width: 844, height: 390 } });
+  const errors = []; page.on('pageerror', e => errors.push(e.message));
+  await page.goto('http://127.0.0.1:5191/?skip&still'); await page.waitForFunction(() => window.__ready);
+  const results = await page.evaluate(() => {
+    const R = window.__game.round, B = R.buffs, camera = window.__game.camera;
+    const checks = [], check = (label, pass) => checks.push({ label, pass: !!pass });
+    const idle = { move: { x: 0, y: 0 }, turn: 0, firing: false };
+    const reset = () => { R.reset(); R.start(); R.spawnT = 999; R.pool.forEach(z => R.retire(z)); R.hero.root.position.set(0, 0, -30); };
+    reset(); const h = R.hero.root.position;
+    B.grant('frenzy'); B.update(3, h, true); B.grant('frenzy');
+    check('same buff refreshes to eight seconds', B.timers.frenzy === 8);
+    B.grant('shield'); B.update(1, h, true); B.grant('blast');
+    check('third buff replaces one, never exceeds two', Object.values(B.timers).filter(t => t > 0).length === 2 && B.has('blast'));
+    B.update(8, h, true); check('buffs expire completely', Object.values(B.timers).every(t => t === 0));
+    B.drop(h, 'pierce'); B.update(0.1, h, false); check('paused drops cannot be collected', !B.has('pierce'));
+    B.update(0.1, h, true); check('nearby drop picked up', B.has('pierce'));
+    B.reset(); B.drop(h.clone().addScalar(10), 'sprint'); B.update(6, h, true);
+    check('uncollected drop expires in six seconds', B.drops.every(d => !d.mesh.visible));
+    for (let i = 0; i < 30; i++) B.drop(h); check('drop pool bounded to twelve', B.drops.length === 12);
+    reset(); B.grant('frenzy'); R.ammo = 1; R.fire(camera);
+    check('frenzy gives 60percent fire rate without ammo cost', R.ammo === 1 && Math.abs(R.cool - 1 / 14.4) < 1e-8);
+    R.reloadT = 1; R.update(0.01, idle, camera); check('frenzy cancels reload', R.reloadT === 0);
+    reset(); const a = R.spawn(0, -34, false, false), b = R.spawn(0, -37, false, false);
+    B.grant('pierce'); R.resolveAim(); R.fire(camera); check('pierce damages both lined-up zombies', a.hp === 2 && b.hp === 2);
+    reset(); const c = R.spawn(0, -34, false, false), d = R.spawn(1, -34, false, false);
+    B.grant('blast'); R.resolveAim(); R.fire(camera); check('blast damages a nearby off-line zombie', c.hp === 1 && d.hp === 2);
+    reset(); const z = R.spawn(0, -31, false, false); B.grant('shield'); const hp = R.hp; R.bite(z, 0, 1);
+    check('shield absorbs exactly one bite', R.hp === hp && !B.has('shield')); R.invuln = 0; R.bite(z, 0, 1); check('next bite hurts', R.hp === hp - 1);
+    reset(); R.update(0.1, { ...idle, move: { x: 0, y: 1 } }, camera); const normal = -30 - h.z;
+    reset(); B.grant('sprint'); R.update(0.1, { ...idle, move: { x: 0, y: 1 } }, camera);
+    check('sprint increases speed by 40percent', Math.abs((-30 - h.z) / normal - 1.4) < 1e-8);
+    reset(); const walker = R.spawn(0, -30.8, false, false); B.grant('sprint'); R.update(0.01, idle, camera);
+    check('sprint shoves ordinary zombies away', walker.vel.length() > 0 && walker.biteCool > 0);
+    reset(); check('retry clears buffs and drops', Object.values(B.timers).every(t => t === 0) && B.drops.every(d => !d.mesh.visible));
+    return checks;
+  });
+  results.forEach(r => console.log(r.pass ? 'PASS' : 'FAIL', r.label));
+  assert(results.every(r => r.pass)); assert.deepEqual(errors, []);
+} finally { await browser.close(); }
