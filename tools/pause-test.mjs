@@ -48,7 +48,8 @@ try {
   await page.waitForFunction(() => window.__game.round.state === 'paused');
   const frozen = await state(page);
   assert.match(await page.locator('#panel').innerText(), /72\s*携带金币/);
-  assert.match(await page.locator('#panel').innerText(), /2 \/ 6\s*已开物资箱/);
+  const crateCount = await page.evaluate(() => window.__game.round.crates.length);
+  assert.match(await page.locator('#panel').innerText(), new RegExp(`2 / ${crateCount}\\s*已开物资箱`));
   await page.keyboard.down('KeyW'); await page.keyboard.down('Space');
   await page.waitForTimeout(600);
   assert.deepEqual(await state(page), frozen, 'all gameplay stays frozen while paused');

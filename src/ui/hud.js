@@ -1,4 +1,5 @@
 import { TUNE } from '../game/round.js';
+import { WEAPONS } from '../game/weapons.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -22,6 +23,7 @@ export class Hud {
     this.panel = $('#panel');
     this.hurtT = 0;
     this.last = {};
+    this.selectedWeapon = 'rifle';
     this.tutorialSeen = false;
     try { this.tutorialSeen = localStorage.getItem('block-zombies:tutorial-seen') === '1'; } catch { /* Private browsing can disable storage. */ }
     this.hp.innerHTML = '<span></span>'.repeat(TUNE.hearts);
@@ -46,6 +48,7 @@ export class Hud {
       this.clock.classList.toggle('hot', v <= 10);
     });
     this.set('kills', round.kills, (v) => (this.kills.textContent = v));
+    this.set('ammoMax', round.weapon?.mag ?? TUNE.mag, (v) => (this.ammoMax.lastChild.textContent = `/${v}`));
     this.set('ammo', round.ammo, (v) => (this.ammo.textContent = Math.max(0, v)));
     this.set('reload', round.reloadT > 0, (v) => (this.reload.hidden = !v));
     if (crossXY) this.cross.style.transform = `translate(${crossXY.x}px, ${crossXY.y}px)${round.target ? ' rotate(45deg) scale(0.85)' : ''}`;
@@ -90,6 +93,12 @@ export class Hud {
   card(html, onGo, keepOpen = false) {
     this.panel.innerHTML = `<div class="card">${html}</div>`;
     this.panel.hidden = false;
+    const choices = this.panel.querySelectorAll('.weapon-choice');
+    choices.forEach((choice) => choice.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.selectedWeapon = choice.dataset.weapon;
+      choices.forEach((button) => button.setAttribute('aria-pressed', String(button === choice)));
+    }));
     const btn = $('.btn', this.panel);
     let used = false;
     const go = (e) => {
@@ -103,6 +112,13 @@ export class Hud {
     btn.addEventListener('touchend', go, { once: !keepOpen });
   }
 
+  weaponChoices() {
+    return `<div class="weapon-choices" role="group" aria-label="选择武器">${Object.values(WEAPONS).map((weapon) => `
+      <button class="weapon-choice" type="button" data-weapon="${weapon.id}" aria-pressed="${this.selectedWeapon === weapon.id}">
+        <strong>${weapon.name}</strong><span>${weapon.description}</span>
+      </button>`).join('')}</div>`;
+  }
+
   title(onGo) {
     this.card(`
       <h1>方块<span class="r">尸潮</span></h1>
@@ -112,10 +128,11 @@ export class Hud {
         撤离车 90 秒到站，4 分钟离开；圈内坚持 5 秒<br>
         撤离带走全部金币，失败保留 25%
       </div>`}
+      ${this.weaponChoices()}
       <button class="btn" type="button">进入街道</button>`, () => {
       this.tutorialSeen = true;
       try { localStorage.setItem('block-zombies:tutorial-seen', '1'); } catch { /* Keep the in-memory flag for this session. */ }
-      onGo();
+      onGo(this.selectedWeapon);
     });
   }
 
@@ -124,7 +141,7 @@ export class Hud {
     const active = Object.entries(names).filter(([key]) => round.buffTimers[key] > 0);
     this.card(`
       <h1>暂停</h1>
-      <p>本局物资</p>
+      <p>本局物资 · ${round.weapon?.name ?? WEAPONS.rifle.name}</p>
       <div class="stats"><div><b>${round.loot}</b>携带金币</div><div><b>${round.opened} / ${round.crates.length}</b>已开物资箱</div></div>
       ${active.length ? `<p class="pause-buffs">${active.map(([key, name]) => `${name} · ${Math.ceil(round.buffTimers[key])} 秒`).join('　')}</p>` : ''}
       <p class="lock-hint" hidden aria-live="polite"></p>
@@ -159,6 +176,7 @@ export class Hud {
       <div class="stats"><div><b>${s.loot ?? 0}</b>搜刮金币</div><div><b>${s.carried ?? (win ? s.loot ?? 0 : Math.floor((s.loot ?? 0) * 0.25))}</b>带出 ${win ? '100%' : '25%（向下取整）'}</div><div><b>${s.bank ?? 0}</b>会话金币</div></div>
       <p class="combat-stats">开箱 ${s.opened ?? 0} · 击倒 ${s.kills} · 命中 ${acc}% · 剩余血量 ${s.hp}</p>
       <p class="save-note">暂不存档 · 会话金币刷新页面即清零</p>
-      <button class="btn" type="button">再来一局</button>`, onGo);
+      ${this.weaponChoices()}
+      <button class="btn" type="button">再来一局</button>`, () => onGo(this.selectedWeapon));
   }
 }
