@@ -83,4 +83,41 @@ html, body {
   border: 3px solid var(--ink); box-shadow: 5px 5px 0 var(--blood); cursor: pointer;
 }
 .btn:active { transform: translate(3px, 3px); box-shadow: 2px 2px 0 var(--blood); }
+/* Mission HUD stays above the aiming area and clear of both thumb controls. */
+.resources { position: absolute; top: 45px; left: calc(18px + var(--safe-l)); display: flex; gap: 12px; font-size: 12px; padding: 3px 6px; background: var(--paper); border: 2px solid var(--ink); }
+.pressure { display: flex; align-items: center; gap: 4px; }
+.pressure i { width: 42px; height: 7px; border: 1px solid var(--ink); background: #c9bfa9; }
+.pressure em { display: block; height: 100%; width: 0; background: var(--blood); }
+.objective { position: absolute; top: 78px; left: 50%; transform: translateX(-50%); width: min(340px, 52vw); text-align: center; font-size: 13px; line-height: 1.5; }
+.phase, .navigation, .interaction, .notice { background: rgba(239, 230, 209, 0.94); padding: 1px 8px; }
+.phase { border: 2px solid var(--ink); }
+.navigation { display: inline-block; font-size: 14px; }
+.interaction { margin: 3px auto 0; width: 240px; max-width: 100%; border: 2px solid var(--ink); }
+.interaction progress { display: block; width: 100%; height: 7px; accent-color: var(--hero); }
+.notice { margin-top: 3px; color: var(--blood); overflow-wrap: anywhere; }
+.buffs { position: absolute; right: calc(18px + var(--safe-r)); top: 80px; padding: 3px 7px; border: 2px solid var(--ink); background: #4f8fb0; color: white; font-size: 12px; }
+.buff-edge { position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 5px #4f8fb0, inset 0 0 35px #4f8fb066; }
+.desktop-hint { display: none; }
+.hint { font-size: 12px; }
+.rules { margin-top: 12px; font-size: 14px; font-weight: 700; line-height: 1.8; }
+.card .save-note { font-size: 12px; opacity: 0.75; }
+.card .combat-stats { font-size: 13px; }
+.card { max-height: calc(100dvh - 24px); overflow-y: auto; touch-action: pan-y; }
+@media (hover: hover) and (pointer: fine) {
+  .desktop-hint { display: inline; }
+  .touch-hint { display: none; }
+}
+@media (max-height: 430px) {
+  .card { padding: 12px 22px 16px; transform: none; }
+  .card h1 { font-size: 34px; }
+  .card p { font-size: 14px; margin-top: 6px; }
+  .card .save-note { font-size: 12px; }
+  .card .combat-stats { font-size: 12px; }
+  .card .stats b { font-size: 26px; }
+  .rules { font-size: 13px; margin-top: 8px; line-height: 1.7; }
+  .btn { margin-top: 12px; font-size: 20px; padding: 5px 24px; }
+  .hint { bottom: 8px; font-size: 11px; padding: 2px 5px; }
+  .objective { font-size: 12px; }
+  .navigation { font-size: 13px; }
+}
 #rotate { position: fixed; inset: 0; display: grid; place-items: center; background: var(--paper); color: var(--ink); font: 900 22px var(--font); }

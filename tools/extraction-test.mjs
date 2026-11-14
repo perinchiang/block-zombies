@@ -1,0 +1,43 @@
+import { chromium } from 'playwright-core';
+import assert from 'node:assert/strict';
+const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+try {
+  const page = await browser.newPage({ viewport: { width: 844, height: 390 } });
+  const errors = []; page.on('pageerror', e => errors.push(e.message));
+  await page.goto('http://127.0.0.1:5191/?skip&still');
+  await page.waitForFunction(() => window.__ready);
+  const results = await page.evaluate(() => {
+    const R = window.__game.round, camera = window.__game.camera;
+    const idle = { move: { x: 0, y: 0 }, turn: 0, firing: false };
+    const checks = [];
+    const check = (label, pass) => checks.push({ label, pass: !!pass });
+    const reset = () => { R.reset(); R.start(); R.spawnT = 999; R.pool.forEach(z => R.retire(z)); };
+    reset();
+    const c = R.crates[0]; R.hero.root.position.set(c.x, 0, c.z + 1);
+    R.extraction.update(R, 1, idle); check('crate requires 1.5 seconds', !c.opened && c.progress === 1);
+    R.extraction.update(R, 0.1, { ...idle, firing: true }); check('firing cancels search', c.progress === 0);
+    R.extraction.update(R, 0.5, idle);
+    R.extraction.update(R, 0.1, { ...idle, move: { x: 1, y: 0 } }); check('moving cancels search', c.progress === 0);
+    R.extraction.update(R, 1.51, idle); check('crate pays once', c.opened && R.loot === c.value);
+    R.extraction.update(R, 2, idle); check('no repeated payout', R.loot === c.value && R.opened === 1);
+    R.elapsed = 89; R.hero.root.position.set(0, 0, -53); R.extraction.update(R, 6, idle);
+    check('no evacuation before signal', !R.evacOpen && R.state === 'play');
+    R.elapsed = 90; R.extraction.update(R, 2, idle); check('signal opens evacuation', R.evacOpen && R.extracting === 2);
+    R.hero.root.position.z = -45; R.extraction.update(R, 2, idle); check('leaving circle pauses countdown', R.extracting === 2);
+    R.hero.root.position.z = -53; const bank = R.bank; R.extraction.update(R, 3, idle);
+    check('five seconds evacuates with all coins', R.state === 'win' && R.bank === bank + c.value);
+    R.finish(true); check('settlement cannot duplicate', R.bank === bank + c.value);
+    reset(); R.loot = 75; const b2 = R.bank; R.finish(false);
+    check('death retains floor25percent', R.bank === b2 + 18);
+    reset(); R.elapsed = 240; R.extraction.update(R, 1, idle);
+    check('deadline closes car without automatic victory', R.missed && !R.evacOpen && R.state === 'play');
+    R.update(0.1, idle, camera); check('missed car maximizes pressure', R.pressure === 100);
+    reset(); R.update(1, idle, camera); const pressure = R.pressure;
+    R.fire(camera); R.update(0.01, idle, camera); check('gunfire raises pressure', R.pressure > pressure + 0.1);
+    const before = R.shots; R.update(0, { ...idle, firing: true }, camera); check('pause does not fire', R.shots === before);
+    reset(); check('retry resets loot and crates, preserves session wallet', R.loot === 0 && R.crates.every(c => !c.opened) && R.bank === b2 + 18);
+    return checks;
+  });
+  for (const r of results) console.log(r.pass ? 'PASS' : 'FAIL', r.label);
+  assert(results.every(r => r.pass)); assert.deepEqual(errors, []);
+} finally { await browser.close(); }

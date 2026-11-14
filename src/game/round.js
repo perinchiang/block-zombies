@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { BlockMan } from '../actor/blockman.js';
 import { BOUNDS } from '../world/arena.js';
+import { Extraction, EXTRACTION } from './extraction.js';
 
-// One 60-second survival round. All tuning lives in TUNE so it can be
-// adjusted after playtests without hunting through the code.
+// Fixed-street extraction playtest. Combat tuning stays here.
 export const TUNE = {
-  length: 60,
+  length: EXTRACTION.deadline,
   hearts: 5,
   heroSpeed: 3.4,
   heroSpeedFiring: 2.6,
@@ -56,6 +56,11 @@ export class Round {
       scene.add(z.root);
       return z;
     });
+    this.extraction = new Extraction(scene);
+    this.crates = this.extraction.crates;
+    this.evac = this.extraction.evac;
+    this.bank = 0; // Session-only; persistent economy belongs to M3.
+    this.buffTimers = {};
     this.aimInfo = { zombie: null, point: new THREE.Vector3(), blocked: false };
     this.state = 'idle';
     this.reset();
@@ -70,6 +75,16 @@ export class Round {
     this.time = TUNE.length;
     this.elapsed = 0;
     this.kills = 0;
+    this.loot = 0;
+    this.opened = 0;
+    this.pressure = 0;
+    this.noise = 0;
+    this.extracting = 0;
+    this.evacOpen = this.missed = this.signaled = this.departed = false;
+    this.nearbyCrate = null;
+    this.notice = '寻找带十字标记的物资箱，停步松开火键搜索';
+    this.noticeT = 7;
+    this.extraction.reset();
     this.shots = 0;
     this.hits = 0;
     this.ammo = TUNE.mag;
@@ -113,7 +128,7 @@ export class Round {
     z.rise = rise ? 0 : 1;
     z.runner = runner;
     z.hp = runner ? TUNE.runnerHp : TUNE.zombieHp;
-    z.speed = runner ? TUNE.runnerSpeed : THREE.MathUtils.lerp(TUNE.walkSpeed[0], TUNE.walkSpeed[1], Math.random());
+    z.speed = (runner ? TUNE.runnerSpeed : THREE.MathUtils.lerp(TUNE.walkSpeed[0], TUNE.walkSpeed[1], Math.random())) * (this.missed ? 1.6 : 1);
     z.lean = runner ? 0.45 : 0.18;
     z.vel.set(0, 0, 0);
     z.biteT = 0;
@@ -126,12 +141,12 @@ export class Round {
   spawnTick(dt) {
     this.spawnT -= dt;
     if (this.spawnT > 0) return;
-    const k = Math.min(1, this.elapsed / TUNE.length);
-    this.spawnT = THREE.MathUtils.lerp(TUNE.spawnStart, TUNE.spawnEnd, k * k * (3 - 2 * k)) * (0.7 + Math.random() * 0.6);
+    const k = this.pressure / 100;
+    this.spawnT = THREE.MathUtils.lerp(TUNE.spawnStart, TUNE.spawnEnd, k * k * (3 - 2 * k)) * (0.7 + Math.random() * 0.6) * (this.missed ? 0.45 : 1);
     if (this.alive >= TUNE.maxAlive) return;
     const h = this.hero.root.position;
     const behind = this.elapsed > TUNE.behindFrom && Math.random() < TUNE.behindChance;
-    const runner = this.elapsed > TUNE.runnerFrom && Math.random() < TUNE.runnerChance;
+    const runner = this.elapsed > TUNE.runnerFrom && Math.random() < (this.missed ? 0.85 : TUNE.runnerChance * (0.4 + k));
     // 'ahead' and 'behind' are relative to where the hero is looking
     const fz = Math.cos(this.yaw) >= 0 ? 1 : -1;
     const dist = TUNE.spawnNear + Math.random() * TUNE.spawnSpread;
@@ -217,6 +232,7 @@ export class Round {
     }
     if (!best) {
       const line = this.trace(h.x, h.z, f.x, f.z);
+      const straightDist = line.dist; // trace reuses its result; preserve before assist checks
       if (line.zombie) best = line.zombie;
       else {
         let bd = TUNE.range;
@@ -232,8 +248,8 @@ export class Round {
         }
         if (!best) {
           aim.zombie = null;
-          aim.point.set(h.x + f.x * line.dist, 1.0, h.z + f.z * line.dist);
-          aim.blocked = line.dist < TUNE.range;
+          aim.point.set(h.x + f.x * straightDist, 1.0, h.z + f.z * straightDist);
+          aim.blocked = straightDist < TUNE.range;
           return aim;
         }
       }
@@ -247,6 +263,7 @@ export class Round {
   fire(camera) {
     const h = this.hero;
     this.shots++;
+    this.noise = Math.min(45, this.noise + 0.12);
     this.ammo--;
     this.cool = 1 / TUNE.fireRate;
     h.recoil = 1;
@@ -299,8 +316,11 @@ export class Round {
     const playing = this.state === 'play';
     let walk = 0;
 
-    if (playing) {
+    if (playing && dt > 0) {
       this.elapsed += dt;
+      this.noticeT = Math.max(0, this.noticeT - dt);
+      this.noise = Math.max(0, this.noise - dt * 0.06);
+      this.pressure = Math.min(100, this.elapsed / TUNE.length * 75 + this.noise + (this.missed ? 100 : 0));
       this.time = Math.max(0, TUNE.length - this.elapsed);
       this.yaw += input.turn;
       if (input.quickTurn && this.turnLeft <= 0) this.turnLeft = Math.PI;
@@ -309,7 +329,6 @@ export class Round {
         this.yaw += step;
         this.turnLeft -= step;
       }
-      this.resolveAim();
 
       // move relative to facing
       const f = this.forward(_a).clone(), r = this.right(_b).clone();
@@ -325,6 +344,7 @@ export class Round {
         if (d < 0.6 && d > 1e-4) { hp.x = z.root.position.x + (dx / d) * 0.6; hp.z = z.root.position.z + (dz / d) * 0.6; }
       }
       this.collide(hp, 0.3);
+      this.resolveAim();
 
       // weapon
       this.cool -= dt;
@@ -336,7 +356,7 @@ export class Round {
       }
       this.invuln -= dt;
       this.spawnTick(dt);
-      if (this.time <= 0) this.finish(true);
+      this.extraction.update(this, dt, input);
     }
     h.root.rotation.y = this.yaw;
     if (this.state === 'dead') {
@@ -346,7 +366,7 @@ export class Round {
     }
     h.pose(dt, walk);
 
-    this.updateZombies(dt, playing);
+    this.updateZombies(dt, this.state === 'play' && dt > 0);
     this.maxAlive = Math.max(this.maxAlive, this.alive);
   }
 
@@ -436,11 +456,13 @@ export class Round {
     if (this.state !== 'play') return;
     this.state = win ? 'win' : 'dead';
     if (win) {
-      // everyone on the street drops at the bell
-      for (const z of this.pool) if (z.active && !z.dead) { z.dead = true; z.deadT = Math.random() * -0.6; }
       this.sfx.win();
     }
-    this.hooks.end?.(win, { kills: this.kills, shots: this.shots, hits: this.hits, time: this.elapsed, hp: this.hp });
+    const carried = win ? this.loot : Math.floor(this.loot * 0.25);
+    this.bank += carried;
+    this.hooks.end?.(win, { kills: this.kills, shots: this.shots, hits: this.hits, time: this.elapsed, hp: this.hp,
+      loot: this.loot, carried, bank: this.bank, opened: this.opened,
+      reason: win ? 'evacuated' : this.missed ? 'missed' : 'dead' });
   }
 }
 

@@ -28,7 +28,7 @@ export class Input {
       if (e.code === 'KeyF' && !e.repeat) this.quick = true;
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => { this.keys.clear(); this.mouseFire = false; });
+    window.addEventListener('blur', () => this.reset());
     el.addEventListener('mousedown', (e) => {
       if (!this.enabled || e.button !== 0) return;
       if (document.pointerLockElement !== el) el.requestPointerLock?.();
@@ -109,7 +109,8 @@ export class Input {
       const k = Math.min(1, len / R);
       const dead = 0.12;
       const m = k < dead ? 0 : (k - dead) / (1 - dead);
-      this.touchMove = len > 0 ? { x: (dx / Math.max(len, 1e-3)) * m, y: (-dy / Math.max(len, 1e-3)) * m } : { x: 0, y: 0 };
+      const clampedLen = Math.min(len, R);
+      this.touchMove = len > 0 ? { x: (dx / clampedLen) * m, y: (-dy / clampedLen) * m } : { x: 0, y: 0 };
     } else {
       this.knobEl.style.transform = '';
       this.stickEl.classList.remove('live');
@@ -142,6 +143,7 @@ export class Input {
     this.keys.clear();
     this.mouseFire = false;
     this.quick = false;
+    this.turn = 0;
     this.fireEl.classList.remove('down');
     this.turnEl?.classList.remove('down');
     this.sync();
