@@ -8,6 +8,7 @@ import { Fx } from './game/fx.js';
 import { Input } from './game/input.js';
 import { Sfx } from './audio/sfx.js';
 import { Hud } from './ui/hud.js';
+import { Profile } from './game/profile.js';
 
 // Dev params:
 //   ?still          freeze time (screenshots)
@@ -46,12 +47,15 @@ const { colliders, group: arena } = buildArena(scene);
 const fx = new Fx(scene);
 const sfx = new Sfx();
 const hud = new Hud();
+const profile = new Profile();
+hud.profile = profile;
+hud.selectedWeapon = profile.equipped;
 
 const cam = { shake: 0, offset: new THREE.Vector3() };
 let hitstop = 0;
 
 const round = new Round({
-  scene, colliders, scenery: [arena], fx, sfx,
+  scene, colliders, scenery: [arena], fx, sfx, profile,
   hooks: {
     camera: () => updateCamera(),
     shake: (a) => (cam.shake = Math.max(cam.shake, a)),
@@ -64,7 +68,7 @@ const round = new Round({
       hud.pauseButton.hidden = true;
       document.exitPointerLock?.();
       setTimeout(() => {
-        hud.result(win, s, (weaponId) => begin(weaponId));
+        hud.result(win, s, () => openShop());
       }, win ? 900 : 1300);
     },
   },
@@ -105,11 +109,28 @@ function syncInput() {
   input.enabled = !portrait && round.state === 'play';
 }
 
-function begin(weaponId = hud.selectedWeapon) {
+function openShop() {
+  round.state = 'shop';
+  input.reset();
+  syncInput();
+  hud.closePause();
+  hud.pauseButton.hidden = true;
+  hud.show(false);
+  profile.refresh();
+  round.bank = profile.coins;
+  hud.selectedWeapon = profile.equipped;
+  hud.title((weaponId, options) => begin(weaponId, options));
+}
+
+function begin(weaponId = hud.selectedWeapon, { trial = false } = {}) {
+  // Trials are explicit, and never change the saved owned loadout.
+  if (trial && weaponId !== 'shotgun') trial = false;
+  if (!trial && !profile.owns(weaponId)) weaponId = profile.equipped;
+  if (!trial) profile.equip(weaponId);
   sfx.init();
   input.reset();
   hud.closePause();
-  round.reset(weaponId);
+  round.reset(weaponId, { trial });
   round.start();
   syncInput();
   hud.pauseButton.hidden = false;
@@ -260,7 +281,8 @@ function frame(now) {
   stats.frames++; if (raw > 1 / 40) stats.slow++;
 
   const paused = round.state === 'paused';
-  let dt = still || portrait || paused ? 0 : raw * timeScale;
+  const inShop = round.state === 'shop';
+  let dt = still || portrait || paused || inShop ? 0 : raw * timeScale;
   if (hitstop > 0 && dt > 0) { hitstop -= raw; dt *= 0.08; }
   if (!paused) {
     cam.shake = Math.max(0, cam.shake - raw * 1.6);
@@ -290,7 +312,7 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
-window.__game = { scene, camera, round, renderer, stats, hud, begin };
+window.__game = { scene, camera, round, renderer, stats, hud, profile, begin, openShop };
 if (params.has('skip') || auto || still) begin();
-else hud.title((weaponId) => begin(weaponId));
+else openShop();
 requestAnimationFrame(frame);
