@@ -84,7 +84,7 @@ try {
     const blocker = R.spawn(muzzle.x, -32, false, false);
     aim(new THREE.Vector3(muzzle.x + 1.5, 2.6, -28), new THREE.Vector3(muzzle.x, 1.1, -40));
     R.resolveAim(camera);
-    check('shoulder camera sees the rear enemy', R.target === far);
+    check('shoulder camera sees the rear enemy', R.aimInfo.zombie === far);
     R.fire(camera); advance();
     check('muzzle path hits foreground body despite clear camera sight', blocker.hp === 2 && far.hp === 3);
 
