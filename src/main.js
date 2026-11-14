@@ -63,7 +63,7 @@ const round = new Round({
       hud.pauseButton.hidden = true;
       document.exitPointerLock?.();
       setTimeout(() => {
-        hud.result(win, s, () => begin());
+        hud.result(win, s, (weaponId) => begin(weaponId));
       }, win ? 900 : 1300);
     },
   },
@@ -105,11 +105,11 @@ function syncInput() {
   input.enabled = !portrait && round.state === 'play';
 }
 
-function begin() {
+function begin(weaponId = hud.selectedWeapon) {
   sfx.init();
   input.reset();
   hud.closePause();
-  round.reset();
+  round.reset(weaponId);
   round.start();
   syncInput();
   hud.pauseButton.hidden = false;
@@ -283,5 +283,5 @@ function frame(now) {
 
 window.__game = { scene, camera, round, renderer, stats, hud, begin };
 if (params.has('skip') || auto || still) begin();
-else hud.title(() => begin());
+else hud.title((weaponId) => begin(weaponId));
 requestAnimationFrame(frame);

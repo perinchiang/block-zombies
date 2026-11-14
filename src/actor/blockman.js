@@ -92,11 +92,21 @@ export class BlockMan {
       const gunMat = toon(COL.ink, { hatch: false });
       const metal = toon(COL.stone, { mid: 0.7 });
       this.gun = new THREE.Group();
-      this.gun.add(part(box(0.1, 0.13, 0.62), gunMat, 0));
+      this.rifle = new THREE.Group();
+      this.shotgun = new THREE.Group();
+      this.rifle.add(part(box(0.1, 0.13, 0.62), gunMat, 0));
       const mag = part(box(0.07, 0.16, 0.08), gunMat, -0.12); mag.position.z = 0.06;
       const barrel = part(box(0.05, 0.05, 0.22), metal, 0.02); barrel.position.z = 0.42;
       const stock = part(box(0.08, 0.1, 0.16), metal, -0.03); stock.position.z = -0.3;
-      this.gun.add(mag, barrel, stock);
+      this.rifle.add(mag, barrel, stock);
+      const wood = toon(COL.hero, { mid: 0.75 });
+      this.shotgun.add(part(box(0.14, 0.16, 0.55), gunMat));
+      const tube = part(box(0.11, 0.09, 0.42), metal, 0.06); tube.position.z = 0.38;
+      const pump = part(box(0.19, 0.13, 0.25), wood, -0.03); pump.position.z = 0.27;
+      const butt = part(box(0.14, 0.17, 0.26), wood, -0.05); butt.position.z = -0.34;
+      this.shotgun.add(tube, pump, butt);
+      this.shotgun.visible = false;
+      this.gun.add(this.rifle, this.shotgun);
       this.gun.position.set(0, -0.44, 0.1);
       this.gun.rotation.set(Math.PI / 2 - 0.37, 0, 0); // level the barrel despite the lowered arm
       this.armR.add(this.gun);
@@ -111,6 +121,14 @@ export class BlockMan {
     this.lean = 0.18;
     this.fall = 0;          // 0 standing .. 1 flat on the ground
     this.pose(0);
+  }
+
+  setWeapon(id) {
+    if (!this.gun) return;
+    this.weaponId = id;
+    this.rifle.visible = id !== 'shotgun';
+    this.shotgun.visible = id === 'shotgun';
+    this.muzzle.position.z = id === 'shotgun' ? 0.6 : 0.55;
   }
 
   /** Brief paper-white flash, the comic "hit" frame. */
@@ -148,7 +166,7 @@ export class BlockMan {
       const s = Math.sin(p) * walk;
       this.legL.rotation.x = s * 0.7;
       this.legR.rotation.x = -s * 0.7;
-      this.recoil = Math.max(0, this.recoil - dt * 12);
+      this.recoil = Math.max(0, this.recoil - dt * (this.weaponId === 'shotgun' ? 5 : 12));
       // shouldered rifle: right arm points forward, left arm braces the barrel
       this.armR.rotation.set(-1.2 - this.recoil * 0.25, 0, 0.08);
       this.armL.rotation.set(-1.0 - this.recoil * 0.2, 0, -0.85);

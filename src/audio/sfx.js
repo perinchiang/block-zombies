@@ -51,11 +51,28 @@ export class Sfx {
     o.start(now); o.stop(now + dur + 0.02);
   }
 
-  shot() {
+  shot(weapon = 'rifle') {
     if (!this.ok) return;
+    if (weapon === 'shotgun') {
+      this.burst({ dur: 0.22, gain: 0.9, f0: 3800, f1: 120 });
+      this.tone({ dur: 0.22, gain: 0.7, f0: 100, f1: 30, type: 'triangle' });
+      this.burst({ t: 0.22, dur: 0.08, gain: 0.2, type: 'highpass', f0: 2300, f1: 1800 });
+      return;
+    }
     this.burst({ dur: 0.09, gain: 0.7, f0: 5200, f1: 700 });
     this.tone({ dur: 0.1, gain: 0.55, f0: 180, f1: 45, type: 'triangle' });
     this.burst({ t: 0.02, dur: 0.18, gain: 0.12, type: 'bandpass', f0: 1800, f1: 900, q: 1.5 });
+  }
+
+  demonCast() {
+    if (!this.ok) return;
+    this.tone({ dur: 0.6, gain: 0.15, f0: 120, f1: 380, type: 'sawtooth' });
+  }
+
+  explosion() {
+    if (!this.ok) return;
+    this.burst({ dur: 0.4, gain: 0.65, f0: 1800, f1: 80 });
+    this.tone({ dur: 0.35, gain: 0.6, f0: 90, f1: 25, type: 'triangle' });
   }
 
   hit(pan = 0) {
