@@ -12,16 +12,9 @@ export class Hud {
     this.ammoMax = $('.ammo', this.el);
     this.reload = $('.reload', this.el);
     this.cross = $('.cross', this.el);
-    this.hint = $('.hint', this.el);
     this.hurtEl = $('#hurt');
-    this.pressure = $('.pressure b', this.el);
-    this.pressureFill = $('.pressure em', this.el);
-    this.loot = $('.loot b', this.el);
-    this.opened = $('.opened b', this.el);
-    this.phase = $('.phase', this.el);
-    this.navigation = $('.navigation', this.el);
+    this.pauseButton = $('.pause', this.el);
     this.interaction = $('.interaction', this.el);
-    this.notice = $('.notice', this.el);
     this.buffs = $('.buffs', this.el);
     this.buffEdge = $('.buff-edge', this.el);
     this.threatBox = $('.threats', this.el);
@@ -29,6 +22,8 @@ export class Hud {
     this.panel = $('#panel');
     this.hurtT = 0;
     this.last = {};
+    this.tutorialSeen = false;
+    try { this.tutorialSeen = localStorage.getItem('block-zombies:tutorial-seen') === '1'; } catch { /* Private browsing can disable storage. */ }
     this.hp.innerHTML = '<span></span>'.repeat(TUNE.hearts);
     this.ammoMax.innerHTML = `<b>${TUNE.mag}</b>/${TUNE.mag}`;
     this.ammo = $('.ammo b', this.el);
@@ -55,49 +50,20 @@ export class Hud {
     this.set('reload', round.reloadT > 0, (v) => (this.reload.hidden = !v));
     if (crossXY) this.cross.style.transform = `translate(${crossXY.x}px, ${crossXY.y}px)${round.target ? ' rotate(45deg) scale(0.85)' : ''}`;
     this.set('lock', !!round.target, (v) => this.cross.classList.toggle('lock', v));
-    if (round.elapsed > 6) this.set('hint', true, () => this.hint.classList.add('gone'));
     if (this.hurtT > 0) { this.hurtT -= dt; this.hurtEl.style.opacity = Math.max(0, this.hurtT / 0.45).toFixed(2); }
   }
 
   updateMission(round) {
-    const pressure = Math.round(Math.max(0, Math.min(100, round.pressure ?? 0)));
-    this.set('pressure', pressure, (v) => {
-      this.pressure.textContent = v;
-      this.pressureFill.style.width = `${v}%`;
-    });
-    this.set('loot', round.loot ?? 0, (v) => (this.loot.textContent = v));
-    this.set('opened', round.opened ?? 0, (v) => (this.opened.textContent = v));
-    this.phase.textContent = round.missed ? '末班车已离开 · 未能撤离' : round.evacOpen
-      ? '撤离车已到 · 倒计时归零即离开' : `搜刮物资 · 撤离车 ${Math.max(0, Math.ceil(90 - round.elapsed))} 秒后到`;
     const h = round.hero.root.position;
-    const distance = (p) => Math.hypot(p.x - h.x, p.z - h.z);
-    let goal = null;
-    if (round.evacOpen) goal = round.evac;
-    else if (!round.missed) {
-      for (const crate of round.crates ?? []) {
-        if (!crate.opened && (!goal || distance(crate) < distance(goal))) goal = crate;
-      }
-    }
-    if (goal) {
-      // Round.right is (-cos(yaw), sin(yaw)): positive angle is screen-right.
-      const a = round.yaw - Math.atan2(goal.x - h.x, goal.z - h.z);
-      const arrows = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'];
-      const index = ((Math.round(a / (Math.PI / 4)) % 8) + 8) % 8;
-      this.navigation.textContent = `${arrows[index]} ${round.evacOpen ? '撤离车' : '最近物资箱'} · ${Math.ceil(distance(goal))} 米`;
-    } else this.navigation.textContent = round.missed ? '失败仍带走 25% 金币' : '物资箱已清空 · 等待撤离车';
     const crate = round.nearbyCrate;
-    const atEvac = round.evacOpen && round.evac && distance(round.evac) <= round.evac.radius;
-    this.interaction.hidden = !atEvac && (!crate || crate.opened) || round.missed;
+    const atEvac = round.evacOpen && round.evac && Math.hypot(round.evac.x - h.x, round.evac.z - h.z) <= round.evac.radius;
+    const opening = crate && !crate.opened && crate.progress > 0;
+    this.interaction.hidden = round.state !== 'play' || round.missed || (!atEvac && !opening);
     if (!this.interaction.hidden) {
       const duration = atEvac ? 5 : 1.5;
-      const elapsed = Math.max(0, Math.min(duration, (atEvac ? round.extracting : crate.progress) ?? 0));
-      $('span', this.interaction).textContent = atEvac
-        ? `圈内坚持 · ${elapsed.toFixed(1)} / 5 秒`
-        : `停步停火开箱 · ${elapsed.toFixed(1)} / 1.5 秒`;
-      $('progress', this.interaction).value = elapsed / duration;
+      $('progress', this.interaction).value = Math.max(0, Math.min(1, (atEvac ? round.extracting : crate.progress) / duration));
+      $('progress', this.interaction).setAttribute('aria-label', atEvac ? '撤离进度' : '开箱进度');
     }
-    this.notice.hidden = !(round.noticeT > 0 && round.notice);
-    this.notice.textContent = this.notice.hidden ? '' : round.notice;
     const names = { frenzy: '狂热', pierce: '穿甲', blast: '爆裂', sprint: '疾走', shield: '墨盾' };
     const active = Object.entries(names).filter(([key]) => round.buffTimers?.[key] > 0).slice(0, 2);
     this.buffs.textContent = active.map(([key, name]) => `${name} ${Math.ceil(round.buffTimers[key])}秒`).join(' · ');
@@ -121,31 +87,68 @@ export class Hud {
     });
   }
 
-  resetHint() { this.hint.classList.remove('gone'); this.last.hint = undefined; }
-
-  card(html, onGo) {
+  card(html, onGo, keepOpen = false) {
     this.panel.innerHTML = `<div class="card">${html}</div>`;
     this.panel.hidden = false;
     const btn = $('.btn', this.panel);
     let used = false;
     const go = (e) => {
       e.preventDefault(); e.stopPropagation();
-      if (used) return;
-      used = true;
-      this.panel.hidden = true;
+      if (used || this.panel.hidden) return;
+      used = !keepOpen;
+      if (!keepOpen) this.panel.hidden = true;
       onGo();
     };
-    btn.addEventListener('click', go, { once: true });
-    btn.addEventListener('touchend', go, { once: true });
+    btn.addEventListener('click', go, { once: !keepOpen });
+    btn.addEventListener('touchend', go, { once: !keepOpen });
   }
 
   title(onGo) {
     this.card(`
       <h1>方块<span class="r">尸潮</span></h1>
-      <p>搜刮金币，活着赶上末班车。</p>
-      <div class="rules">物资箱：靠近 1.6 米，停步停火 1.5 秒自动开箱<br>撤离车：90 秒到站，240 秒离开；圈内坚持 5 秒<br>成功带走全部金币；死亡 / 错过末班车只带走 25%</div>
-      <p class="save-note">M1 原型 · 金币仅本次会话累计，暂不存档</p>
-      <button class="btn" type="button">进入街道</button>`, onGo);
+      ${this.tutorialSeen ? '' : `<div class="rules tutorial">
+        <span class="touch-hint">左侧移动 · 右侧拖动转向 · 按住开火</span><span class="desktop-hint">WASD 移动 · 鼠标转向/开火</span><br>
+        靠近物资箱，停步停火 1.5 秒搜索<br>
+        撤离车 90 秒到站，4 分钟离开；圈内坚持 5 秒<br>
+        撤离带走全部金币，失败保留 25%
+      </div>`}
+      <button class="btn" type="button">进入街道</button>`, () => {
+      this.tutorialSeen = true;
+      try { localStorage.setItem('block-zombies:tutorial-seen', '1'); } catch { /* Keep the in-memory flag for this session. */ }
+      onGo();
+    });
+  }
+
+  pause(round, onResume) {
+    const names = { frenzy: '狂热', pierce: '穿甲', blast: '爆裂', sprint: '疾走', shield: '墨盾' };
+    const active = Object.entries(names).filter(([key]) => round.buffTimers[key] > 0);
+    this.card(`
+      <h1>暂停</h1>
+      <p>本局物资</p>
+      <div class="stats"><div><b>${round.loot}</b>携带金币</div><div><b>${round.opened} / ${round.crates.length}</b>已开物资箱</div></div>
+      ${active.length ? `<p class="pause-buffs">${active.map(([key, name]) => `${name} · ${Math.ceil(round.buffTimers[key])} 秒`).join('　')}</p>` : ''}
+      <p class="lock-hint" hidden aria-live="polite"></p>
+      <button class="btn" type="button">继续游戏</button>`, onResume, true);
+    this.panel.setAttribute('role', 'dialog');
+    this.panel.setAttribute('aria-modal', 'true');
+    this.panel.setAttribute('aria-label', '游戏暂停');
+    this.panel.querySelector('.btn').focus();
+  }
+
+  pauseLockHint() {
+    const hint = $('.lock-hint', this.panel);
+    if (!hint) return;
+    hint.textContent = '鼠标尚未锁定，点击继续游戏';
+    hint.hidden = false;
+  }
+
+  closePause() {
+    this.panel.querySelector('.btn')?.blur();
+    this.panel.hidden = true;
+    this.panel.removeAttribute('role');
+    this.panel.removeAttribute('aria-modal');
+    this.panel.removeAttribute('aria-label');
+    this.pauseButton.blur();
   }
 
   result(win, s, onGo) {
