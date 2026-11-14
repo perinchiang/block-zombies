@@ -17,7 +17,6 @@ export const TUNE = {
   assistAngle: 0.16,     // radians of aim assist cone (~9°), only used when the barrel line is empty
   pointBlank: 1.6,       // metres: a zombie this close in front always takes the shot
   pointBlankCone: 0.55,  // radians either side of facing (~60° fan)
-  turnSpeed: 16,         // radians per second for the quick 180° turn
   zombieHp: 3,
   runnerHp: 2,
   walkSpeed: [1.05, 1.45],
@@ -98,7 +97,6 @@ export class Round {
     this.groanT = 1.5;
     this.maxAlive = 0;
     this.heroFall = 0;
-    this.turnLeft = 0;
     this.aimInfo.zombie = null;
     this.heroKick = new THREE.Vector3();
     for (const z of this.pool) this.retire(z);
@@ -353,12 +351,6 @@ export class Round {
       this.pressure = Math.min(100, this.elapsed / TUNE.length * 75 + this.noise + (this.missed ? 100 : 0));
       this.time = Math.max(0, TUNE.length - this.elapsed);
       this.yaw += input.turn;
-      if (input.quickTurn && this.turnLeft <= 0) this.turnLeft = Math.PI;
-      if (this.turnLeft > 0) {
-        const step = Math.min(this.turnLeft, TUNE.turnSpeed * dt);
-        this.yaw += step;
-        this.turnLeft -= step;
-      }
 
       // move relative to facing
       const f = this.forward(_a).clone(), r = this.right(_b).clone();

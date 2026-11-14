@@ -58,15 +58,18 @@ const round = new Round({
     hurt: () => hud.hurt(),
     end: (win, s) => {
       window.__game.result = { win, ...s };
+      syncInput();
+      input.reset();
+      hud.pauseButton.hidden = true;
+      document.exitPointerLock?.();
       setTimeout(() => {
-        input.reset();
         hud.result(win, s, () => begin());
       }, win ? 900 : 1300);
     },
   },
 });
 
-const input = new Input(canvas, { stick: document.querySelector('.stick'), knob: document.querySelector('.knob'), fire: document.querySelector('.fire'), turn: document.querySelector('.turn') });
+const input = new Input(canvas, { stick: document.querySelector('.stick'), knob: document.querySelector('.knob'), fire: document.querySelector('.fire') });
 
 // over-the-shoulder rig, in hero space: right, up, back / right, up, forward
 const CAM_OFF = vec(params.get('cam'), new THREE.Vector3(1.35, 2.55, 3.7));
@@ -76,6 +79,7 @@ scene.add(camera);
 const ink = new InkLine(renderer);
 const rotateEl = document.getElementById('rotate');
 let W = 1, H = 1, portrait = false;
+let mouseLocked = false, resumeWithMouse = false, resuming = false;
 
 function resize() {
   W = window.innerWidth; H = window.innerHeight;
@@ -90,21 +94,84 @@ function resize() {
   camera.updateProjectionMatrix();
   portrait = H > W;
   rotateEl.hidden = !portrait;
-  input.enabled = !portrait;
+  syncInput();
   if (portrait) input.reset();
 }
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', () => setTimeout(resize, 200));
 resize();
 
+function syncInput() {
+  input.enabled = !portrait && round.state === 'play';
+}
+
 function begin() {
   sfx.init();
+  input.reset();
+  hud.closePause();
   round.reset();
   round.start();
-  hud.resetHint();
+  syncInput();
+  hud.pauseButton.hidden = false;
+  resumeWithMouse = resuming = false;
   hud.show(true);
+  hitstop = 0;
   cam.init = false;
 }
+
+function pause() {
+  if (round.state !== 'play') return;
+  resumeWithMouse = document.pointerLockElement === canvas || mouseLocked;
+  round.state = 'paused';
+  syncInput();
+  input.reset();
+  document.exitPointerLock?.();
+  hud.pause(round, resume);
+}
+
+function resume() {
+  if (round.state !== 'paused' || portrait || document.hidden || resuming) return;
+  if (resumeWithMouse && document.pointerLockElement !== canvas) {
+    resuming = true;
+    // Stay paused until aim is usable again. Some browsers require another click
+    // after Escape releases the pointer, so a rejected request keeps the panel open.
+    try { canvas.requestPointerLock()?.catch(resumeLockFailed); } catch { resumeLockFailed(); }
+    return;
+  }
+  completeResume();
+}
+
+function completeResume() {
+  resuming = false;
+  if (round.state !== 'paused' || portrait || document.hidden) return;
+  input.reset();
+  round.state = 'play';
+  hud.closePause();
+  syncInput();
+}
+
+function resumeLockFailed() {
+  if (!resuming) return;
+  resuming = false;
+  hud.pauseLockHint();
+}
+
+// A second thumb does not always produce a compatibility click on mobile.
+hud.pauseButton.addEventListener('pointerdown', (e) => { e.preventDefault(); pause(); });
+hud.pauseButton.addEventListener('click', pause);
+window.addEventListener('keydown', (e) => {
+  if (e.code !== 'Escape' || e.repeat) return;
+  if (round.state === 'paused') resume(); else pause();
+});
+// A phone switching apps must not leave combat running behind the page.
+document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+document.addEventListener('pointerlockchange', () => {
+  const locked = document.pointerLockElement === canvas;
+  if (!locked) pause();
+  mouseLocked = locked;
+  if (locked && resuming) completeResume();
+});
+document.addEventListener('pointerlockerror', resumeLockFailed);
 
 // ---- autopilot: turns to the nearest zombie, fires, backs off when crowded.
 // ?auto is a decent player; ?auto=weak turns slowly, hesitates and never backs off,
@@ -168,11 +235,14 @@ function frame(now) {
   if (fpsEl && frames % 15 === 0) fpsEl.textContent = `${ftAvg.toFixed(1)} ms · ${round.alive} zombies`;
   stats.frames++; if (raw > 1 / 40) stats.slow++;
 
-  let dt = still || portrait ? 0 : raw * timeScale;
-  if (hitstop > 0) { hitstop -= raw; dt *= 0.08; }
-  const inp = auto && round.state === 'play' ? autopilot(dt) : input.read();
-  round.update(dt, inp, camera);
-  fx.update(dt);
+  const paused = round.state === 'paused';
+  let dt = still || portrait || paused ? 0 : raw * timeScale;
+  if (hitstop > 0 && dt > 0) { hitstop -= raw; dt *= 0.08; }
+  if (!paused) {
+    const inp = auto && round.state === 'play' ? autopilot(dt) : input.read();
+    round.update(dt, inp, camera);
+    fx.update(dt);
+  }
 
   // camera follows facing; position eases, look stays locked to the aim
   const hp = round.hero.root.position;
@@ -184,15 +254,17 @@ function frame(now) {
   let k = 1;
   if (Math.abs(hp.x + ox) > WALL && Math.abs(ox) > 1e-4) k = THREE.MathUtils.clamp((Math.sign(hp.x + ox) * WALL - hp.x) / ox, 0.3, 1);
   const want = _v.set(hp.x + ox * k, CAM_OFF.y + (1 - k) * 1.6, hp.z + oz * k);
-  if (!cam.init) { cam.pos.copy(want); cam.init = true; } else cam.pos.lerp(want, 1 - Math.exp(-raw * 14));
+  if (!cam.init) { cam.pos.copy(want); cam.init = true; } else if (!paused) cam.pos.lerp(want, 1 - Math.exp(-raw * 14));
   cam.look.copy(hp).addScaledVector(_r, LOOK_OFF.x).addScaledVector(_f, LOOK_OFF.z).setY(LOOK_OFF.y);
-  cam.t += raw;
-  cam.shake = Math.max(0, cam.shake - raw * 1.6);
-  const s = cam.shake * cam.shake * 0.6;
-  camera.position.copy(cam.pos);
-  camera.position.x += (Math.random() - 0.5) * s;
-  camera.position.y += (Math.random() - 0.5) * s;
-  camera.lookAt(cam.look);
+  if (!paused) {
+    cam.t += raw;
+    cam.shake = Math.max(0, cam.shake - raw * 1.6);
+    const s = cam.shake * cam.shake * 0.6;
+    camera.position.copy(cam.pos);
+    camera.position.x += (Math.random() - 0.5) * s;
+    camera.position.y += (Math.random() - 0.5) * s;
+    camera.lookAt(cam.look);
+  }
 
   // shadows follow the hero so the frustum stays tight
   sun.position.copy(hp).add(SUN_OFF);
@@ -201,7 +273,7 @@ function frame(now) {
   // crosshair: where the aim line meets the street ahead
   // crosshair sits exactly where the next bullet lands
   const aimAt = _v.copy(round.aimInfo.point).project(camera);
-  hud.update(round, raw, { x: (aimAt.x + 1) * 0.5 * W, y: (1 - aimAt.y) * 0.5 * H });
+  hud.update(round, paused ? 0 : raw, { x: (aimAt.x + 1) * 0.5 * W, y: (1 - aimAt.y) * 0.5 * H });
   hud.threats(threatsAround(), W, H);
 
   ink.render(scene, camera, scene.fog);
