@@ -4,6 +4,8 @@
 
 当前阶段：**第一天 · 画风样张**。只有场景、主角、僵尸和界面占位，还不能玩。
 
+在线预览：https://perinchiang.github.io/block-zombies/ （推送到 main 后由 GitHub Actions 自动部署）
+
 ## 运行
 
 ```bash
@@ -14,7 +16,7 @@ npm run dev          # http://localhost:5191 ，同一 Wi-Fi 的手机可用局�
 调试参数：
 
 - `?still` 定格画面（截图用）
-- `?shade=flat` 阴影改为纯墨块、不排线（画风对比）
+- `?shade=flat` 阴影改为纯墨块、不排线（未选用的对比方案 B）
 - `?cam=x,y,z&look=x,y,z` 试镜头（相对主角的偏移）
 
 截图：`node tools/shot.mjs "?still" shots/a.png --w=844 --h=390 --dpr=2 --mobile`（需要先开 dev server）。
