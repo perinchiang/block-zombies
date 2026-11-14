@@ -14,7 +14,7 @@ import { Hud } from './ui/hud.js';
 //   ?skip           skip the title card
 //   ?auto           autopilot plays the round (tests); ?speed=3 runs faster
 //   ?shade=flat     solid ink shadows instead of hatching (style comparison)
-//   ?cam=x,y,z&look=x,y,z   camera offsets in hero space (right, up, back / right, up, forward)
+//   ?cam=x,y,z   camera offset in hero space (right, up, back)
 //   ?fps            show a frame-time readout
 const params = new URLSearchParams(location.search);
 const still = params.has('still');
@@ -42,17 +42,18 @@ sun.shadow.bias = -0.0008;
 sun.shadow.normalBias = 0.03;
 scene.add(sun, sun.target);
 
-const { colliders } = buildArena(scene);
+const { colliders, group: arena } = buildArena(scene);
 const fx = new Fx(scene);
 const sfx = new Sfx();
 const hud = new Hud();
 
-const cam = { shake: 0, t: 0, pos: new THREE.Vector3(), look: new THREE.Vector3(), init: false };
+const cam = { shake: 0, offset: new THREE.Vector3() };
 let hitstop = 0;
 
 const round = new Round({
-  scene, colliders, fx, sfx,
+  scene, colliders, scenery: [arena], fx, sfx,
   hooks: {
+    camera: () => updateCamera(),
     shake: (a) => (cam.shake = Math.max(cam.shake, a)),
     hitstop: (t) => (hitstop = Math.max(hitstop, t)),
     hurt: () => hud.hurt(),
@@ -71,9 +72,8 @@ const round = new Round({
 
 const input = new Input(canvas, { stick: document.querySelector('.stick'), knob: document.querySelector('.knob'), fire: document.querySelector('.fire') });
 
-// over-the-shoulder rig, in hero space: right, up, back / right, up, forward
+// Over-the-shoulder rig, in hero space: right, up, back.
 const CAM_OFF = vec(params.get('cam'), new THREE.Vector3(1.35, 2.55, 3.7));
-const LOOK_OFF = vec(params.get('look'), new THREE.Vector3(0.75, 0.55, 4.2));
 const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 120);
 scene.add(camera);
 const ink = new InkLine(renderer);
@@ -116,7 +116,8 @@ function begin(weaponId = hud.selectedWeapon) {
   resumeWithMouse = resuming = false;
   hud.show(true);
   hitstop = 0;
-  cam.init = false;
+  cam.shake = 0;
+  cam.offset.set(0, 0, 0);
 }
 
 function pause() {
@@ -223,10 +224,32 @@ function threatsAround() {
 }
 
 // ---- frame
-const _f = new THREE.Vector3(), _r = new THREE.Vector3(), _v = new THREE.Vector3();
+const _f = new THREE.Vector3(), _r = new THREE.Vector3();
 const fpsEl = params.has('fps') ? Object.assign(document.body.appendChild(document.createElement('div')), { style: 'position:fixed;left:6px;bottom:4px;font:12px monospace;color:#1d1b21;z-index:9' }) : null;
 let last = performance.now(), frames = 0, ftAvg = 16;
 const stats = { frames: 0, slow: 0 };
+
+function updateCamera() {
+  const hp = round.hero.root.position;
+  _f.set(Math.sin(round.yaw), 0, Math.cos(round.yaw));
+  _r.set(-Math.cos(round.yaw), 0, Math.sin(round.yaw));
+  // Orbit around shoulder height. Pitch rotates both the view and the rig;
+  // ground/wall clearance keeps extreme angles outside the scenery.
+  const pivot = hp.clone().setY(1.25);
+  const offset = _r.clone().multiplyScalar(CAM_OFF.x).addScaledVector(_f, -CAM_OFF.z).setY(CAM_OFF.y - pivot.y);
+  offset.applyAxisAngle(_r, round.pitch);
+  const want = pivot.clone().add(offset);
+  want.x = THREE.MathUtils.clamp(want.x, -6.3, 6.3);
+  want.y = Math.max(0.25, want.y);
+  round.scene.updateMatrixWorld(true);
+  const arm = want.clone().sub(pivot);
+  const obstruction = round.ballistics.trace(pivot, arm.clone().normalize(), arm.length(), new Set(), true);
+  if (obstruction.blocked) want.copy(pivot).addScaledVector(arm.normalize(), Math.max(0, obstruction.distance - 0.2));
+  camera.position.copy(want).add(cam.offset);
+  const direction = _f.clone().multiplyScalar(Math.cos(round.pitch)).setY(Math.sin(round.pitch));
+  camera.lookAt(camera.position.clone().add(direction));
+  camera.updateMatrixWorld(true);
+}
 
 function frame(now) {
   const raw = Math.min(0.05, (now - last) / 1000);
@@ -239,41 +262,26 @@ function frame(now) {
   let dt = still || portrait || paused ? 0 : raw * timeScale;
   if (hitstop > 0 && dt > 0) { hitstop -= raw; dt *= 0.08; }
   if (!paused) {
+    cam.shake = Math.max(0, cam.shake - raw * 1.6);
+    const shake = cam.shake * cam.shake * 0.6;
+    cam.offset.set((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, 0);
     const inp = auto && round.state === 'play' ? autopilot(dt) : input.read();
     round.update(dt, inp, camera);
     fx.update(dt);
   }
 
-  // camera follows facing; position eases, look stays locked to the aim
   const hp = round.hero.root.position;
-  _f.set(Math.sin(round.yaw), 0, Math.cos(round.yaw));
-  _r.set(-Math.cos(round.yaw), 0, Math.sin(round.yaw));
-  // shoulder offset; if it would push into a building, slide in and up instead
-  const ox = _r.x * CAM_OFF.x - _f.x * CAM_OFF.z, oz = _r.z * CAM_OFF.x - _f.z * CAM_OFF.z;
-  const WALL = 6.3;
-  let k = 1;
-  if (Math.abs(hp.x + ox) > WALL && Math.abs(ox) > 1e-4) k = THREE.MathUtils.clamp((Math.sign(hp.x + ox) * WALL - hp.x) / ox, 0.3, 1);
-  const want = _v.set(hp.x + ox * k, CAM_OFF.y + (1 - k) * 1.6, hp.z + oz * k);
-  if (!cam.init) { cam.pos.copy(want); cam.init = true; } else if (!paused) cam.pos.lerp(want, 1 - Math.exp(-raw * 14));
-  cam.look.copy(hp).addScaledVector(_r, LOOK_OFF.x).addScaledVector(_f, LOOK_OFF.z).setY(LOOK_OFF.y);
   if (!paused) {
-    cam.t += raw;
-    cam.shake = Math.max(0, cam.shake - raw * 1.6);
-    const s = cam.shake * cam.shake * 0.6;
-    camera.position.copy(cam.pos);
-    camera.position.x += (Math.random() - 0.5) * s;
-    camera.position.y += (Math.random() - 0.5) * s;
-    camera.lookAt(cam.look);
+    updateCamera();
+    round.resolveAim(camera);
   }
 
   // shadows follow the hero so the frustum stays tight
   sun.position.copy(hp).add(SUN_OFF);
   sun.target.position.copy(hp);
 
-  // crosshair: where the aim line meets the street ahead
-  // crosshair sits exactly where the next bullet lands
-  const aimAt = _v.copy(round.aimInfo.point).project(camera);
-  hud.update(round, paused ? 0 : raw, { x: (aimAt.x + 1) * 0.5 * W, y: (1 - aimAt.y) * 0.5 * H });
+  // A fixed sight never snaps to a target; muzzle obstruction is physical.
+  hud.update(round, paused ? 0 : raw, { x: W / 2, y: H / 2 });
   hud.threats(threatsAround(), W, H);
 
   ink.render(scene, camera, scene.fog);

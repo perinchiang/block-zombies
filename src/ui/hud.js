@@ -58,14 +58,11 @@ export class Hud {
 
   updateMission(round) {
     const h = round.hero.root.position;
-    const crate = round.nearbyCrate;
     const atEvac = round.evacOpen && round.evac && Math.hypot(round.evac.x - h.x, round.evac.z - h.z) <= round.evac.radius;
-    const opening = crate && !crate.opened && crate.progress > 0;
-    this.interaction.hidden = round.state !== 'play' || round.missed || (!atEvac && !opening);
+    this.interaction.hidden = round.state !== 'play' || round.missed || !atEvac;
     if (!this.interaction.hidden) {
-      const duration = atEvac ? 5 : 1.5;
-      $('progress', this.interaction).value = Math.max(0, Math.min(1, (atEvac ? round.extracting : crate.progress) / duration));
-      $('progress', this.interaction).setAttribute('aria-label', atEvac ? '撤离进度' : '开箱进度');
+      $('progress', this.interaction).value = Math.max(0, Math.min(1, round.extracting / 5));
+      $('progress', this.interaction).setAttribute('aria-label', '撤离进度');
     }
     const names = { frenzy: '狂热', pierce: '穿甲', blast: '爆裂', sprint: '疾走', shield: '墨盾' };
     const active = Object.entries(names).filter(([key]) => round.buffTimers?.[key] > 0).slice(0, 2);
@@ -123,8 +120,9 @@ export class Hud {
     this.card(`
       <h1>方块<span class="r">尸潮</span></h1>
       ${this.tutorialSeen ? '' : `<div class="rules tutorial">
-        <span class="touch-hint">左侧移动 · 右侧拖动转向 · 按住开火</span><span class="desktop-hint">WASD 移动 · 鼠标转向/开火</span><br>
-        靠近物资箱，停步停火 1.5 秒搜索<br>
+        <span class="touch-hint">左侧移动 · 右侧上下左右瞄准 · 按住开火也能拖动瞄准</span><span class="desktop-hint">WASD 移动 · 鼠标上下左右瞄准 · 左键开火</span><br>
+        对准屏幕中心开火，无自动瞄准；远处移动目标需提前量<br>
+        靠近自动开箱、收金币，移动开火也能拾取；红箱先击败恶魔<br>
         撤离车 90 秒到站，4 分钟离开；圈内坚持 5 秒<br>
         撤离带走全部金币，失败保留 25%
       </div>`}

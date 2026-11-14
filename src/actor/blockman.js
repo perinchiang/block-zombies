@@ -172,7 +172,7 @@ export class BlockMan {
       this.armL.rotation.set(-1.0 - this.recoil * 0.2, 0, -0.85);
       this.gun.position.z = 0.1 - this.recoil * 0.06;
       this.torso.rotation.y = -0.12;
-      this.torso.rotation.x = -this.recoil * 0.04;
+      this.torso.rotation.x = -(this.aimPitch ?? 0) - this.recoil * 0.04;
       this.head.rotation.y = 0.12;
       this.body.position.y = Math.abs(Math.cos(p)) * 0.06 * walk + Math.sin(t * 2) * 0.008;
     }

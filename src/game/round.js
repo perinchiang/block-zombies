@@ -5,6 +5,7 @@ import { Extraction, EXTRACTION } from './extraction.js';
 import { Buffs } from './buffs.js';
 import { WEAPONS } from './weapons.js';
 import { DemonEncounter } from './demon-encounter.js';
+import { Ballistics } from './ballistics.js';
 
 // Fixed-street extraction playtest. Combat tuning stays here.
 export const TUNE = {
@@ -16,9 +17,6 @@ export const TUNE = {
   mag: 24,
   reload: 1.25,
   range: 24,
-  assistAngle: 0.16,     // radians of aim assist cone (~9°), only used when the barrel line is empty
-  pointBlank: 1.6,       // metres: a zombie this close in front always takes the shot
-  pointBlankCone: 0.55,  // radians either side of facing (~60° fan)
   zombieHp: 3,
   runnerHp: 2,
   walkSpeed: [1.05, 1.45],
@@ -42,7 +40,7 @@ export const TUNE = {
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3();
 
 export class Round {
-  constructor({ scene, colliders, fx, sfx, hooks }) {
+  constructor({ scene, colliders, scenery = [], fx, sfx, hooks }) {
     this.scene = scene;
     this.colliders = colliders;
     this.fx = fx;
@@ -68,6 +66,7 @@ export class Round {
     this.buffs = new Buffs(scene);
     this.buffTimers = this.buffs.timers;
     this.aimInfo = { zombie: null, point: new THREE.Vector3(), blocked: false };
+    this.ballistics = new Ballistics(this, [...scenery, ...this.crates.map(c => c.root), this.extraction.vehicle]);
     this.state = 'idle';
     this.reset();
   }
@@ -79,6 +78,11 @@ export class Round {
     h.root.position.set(0, 0, -14); // mid-street: room ahead and behind
     h.root.rotation.set(0, 0, 0);
     this.yaw = Math.PI;              // facing -Z, down the street
+    this.pitch = -0.18;
+    h.aimPitch = this.pitch;
+    h.recoil = 0;
+    h.pose(0);
+    this.ballistics.clear();
     this.hp = TUNE.hearts;
     this.time = TUNE.length;
     this.elapsed = 0;
@@ -90,7 +94,7 @@ export class Round {
     this.extracting = 0;
     this.evacOpen = this.missed = this.signaled = this.departed = false;
     this.nearbyCrate = null;
-    this.notice = '寻找带十字标记的物资箱，停步松开火键搜索';
+    this.notice = '靠近带十字标记的物资箱，自动拾取物资';
     this.noticeT = 7;
     this.extraction.reset();
     this.buffs.reset();
@@ -190,88 +194,17 @@ export class Round {
 
   targetable(z) { return z.active && !z.dead && z.rise >= 0.6; }
 
-  /**
-   * Trace a flat ray from (ox, oz) along (dx, dz). Returns the first zombie it
-   * would hit before any solid prop, the distance travelled, and (for piercing
-   * shots) every zombie on the way.
-   */
-  trace(ox, oz, dx, dz, pierce = false) {
-    let stop = this.weapon.range;
-    for (const c of this.colliders) {
-      if (c.r < 0.3) continue;              // lamp posts and thin poles don't stop bullets
-      const t = (c.x - ox) * dx + (c.z - oz) * dz;
-      if (t < 0 || t > stop) continue;
-      const px = ox + dx * t - c.x, pz = oz + dz * t - c.z;
-      if (px * px + pz * pz < c.r * c.r * 0.8) stop = t;
-    }
-    const out = this._trace || (this._trace = { zombie: null, dist: 0, list: [] });
-    out.zombie = null; out.dist = stop; out.list.length = 0;
-    for (const z of this.pool) {
-      if (!this.targetable(z)) continue;
-      const t = (z.root.position.x - ox) * dx + (z.root.position.z - oz) * dz;
-      if (t < -0.2 || t > stop) continue;
-      const px = ox + dx * t - z.root.position.x, pz = oz + dz * t - z.root.position.z;
-      const radius = z.radius ?? 0.38;
-      if (px * px + pz * pz < radius * radius) out.list.push({ z, t });
-    }
-    out.list.sort((a, b) => a.t - b.t);
-    if (out.list.length) {
-      out.zombie = out.list[0].z;
-      if (!pierce) out.dist = Math.max(0, out.list[0].t);
-    }
-    return out;
-  }
-
-  /**
-   * Decide where the next shot goes, in threat order:
-   *  1. point-blank: anything right in our face,
-   *  2. whatever the straight barrel line already hits,
-   *  3. assist toward the NEAREST zombie in a narrow cone (never a far one
-   *     past a near one), only if nothing is on the barrel line.
-   * The crosshair is drawn at aim.point, so what you see is what you hit.
-   */
-  resolveAim() {
-    const h = this.hero.root.position;
-    const f = this.forward(_c);
-    const aim = this.aimInfo;
-    let best = null, bestD = TUNE.pointBlank;
-    const cosPB = Math.cos(TUNE.pointBlankCone);
-    for (const z of this.pool) {
-      if (!this.targetable(z)) continue;
-      const dx = z.root.position.x - h.x, dz = z.root.position.z - h.z, d = Math.hypot(dx, dz);
-      if (d < bestD && (dx * f.x + dz * f.z) / Math.max(d, 1e-4) > cosPB) {
-        const los = this.trace(h.x, h.z, dx / d, dz / d);
-        if (los.zombie) { best = los.zombie; bestD = d; }
-      }
-    }
-    if (!best) {
-      const line = this.trace(h.x, h.z, f.x, f.z);
-      const straightDist = line.dist; // trace reuses its result; preserve before assist checks
-      if (line.zombie) best = line.zombie;
-      else {
-        let bd = this.weapon.range;
-        for (const z of this.pool) {
-          if (!this.targetable(z)) continue;
-          const dx = z.root.position.x - h.x, dz = z.root.position.z - h.z, d = Math.hypot(dx, dz);
-          if (d >= bd || d < 0.2) continue;
-          const a = Math.acos(THREE.MathUtils.clamp((dx * f.x + dz * f.z) / d, -1, 1));
-          if (a > TUNE.assistAngle * (d < 5 ? 1.6 : 1)) continue;
-          // line of sight: if another zombie stands in the way, that one is the target
-          const los = this.trace(h.x, h.z, dx / d, dz / d);
-          if (los.zombie) { best = los.zombie; bd = d; }
-        }
-        if (!best) {
-          aim.zombie = null;
-          aim.point.set(h.x + f.x * straightDist, 1.0, h.z + f.z * straightDist);
-          aim.blocked = straightDist < this.weapon.range;
-          return aim;
-        }
-      }
-    }
-    aim.zombie = best;
-    aim.blocked = false;
-    this.chest(best, aim.point);
-    return aim;
+  // Sight only describes the camera ray. Bullets independently collide along
+  // their muzzle path; no target selection or homing changes their direction.
+  resolveAim(camera) {
+    this.scene.updateMatrixWorld(true);
+    const origin = camera ? camera.position.clone() : this.hero.muzzle.getWorldPosition(new THREE.Vector3());
+    const dir = camera ? camera.getWorldDirection(new THREE.Vector3()) : this.forward(new THREE.Vector3()).multiplyScalar(Math.cos(this.pitch)).setY(Math.sin(this.pitch));
+    const hit = this.ballistics.trace(origin, dir, this.weapon.range + (camera ? 5 : 0));
+    this.aimInfo.point.copy(hit.point);
+    this.aimInfo.zombie = hit.zombie;
+    this.aimInfo.blocked = hit.blocked;
+    return this.aimInfo;
   }
 
   fire(camera) {
@@ -282,54 +215,28 @@ export class Round {
     if (!this.buffs.has('frenzy')) this.ammo--;
     this.cool = 1 / (weapon.fireRate * (this.buffs.has('frenzy') ? 1.6 : 1));
     h.recoil = 1;
-    const muzzle = h.muzzle.getWorldPosition(new THREE.Vector3());
-    const origin = new THREE.Vector3(h.root.position.x, 1.0, h.root.position.z);
-    const dir = this.forward(new THREE.Vector3());
-    const aim = this.aimInfo;
-    if (aim.zombie) { dir.set(aim.point.x - origin.x, 0, aim.point.z - origin.z); if (dir.lengthSq() > 1e-6) dir.normalize(); else this.forward(dir); }
-    // tiny spread so streams of fire read as hand-held (none at point-blank)
-    const spread = aim.zombie && origin.distanceTo(aim.point) < TUNE.pointBlank ? 0 : 0.02;
-    dir.x += (Math.random() - 0.5) * spread; dir.z += (Math.random() - 0.5) * spread; dir.normalize();
-
-    const piercing = this.buffs.has('pierce');
-    // Resolve the whole fan before damage so a killed enemy does not make the
-    // remaining pellets tunnel through its body in the same trigger pull.
-    const victims = new Map();
-    let blastAt = null;
+    let muzzle = h.muzzle.getWorldPosition(new THREE.Vector3());
+    const aim = this.resolveAim(camera);
+    const forward = camera.getWorldDirection(new THREE.Vector3());
+    const dir = aim.point.clone().sub(muzzle);
+    if (dir.dot(forward) <= 0.05) dir.copy(forward); else dir.normalize();
+    // A barrel may protrude beyond a nearby body or wall: inspect the path
+    // from the grip first so it cannot spawn bullets on the far side.
+    const grip = h.gun.getWorldPosition(new THREE.Vector3());
+    const barrel = muzzle.clone().sub(grip);
+    const obstruction = this.ballistics.trace(grip, barrel.clone().normalize(), barrel.length());
+    if (obstruction.blocked || obstruction.zombie) muzzle = obstruction.point.addScaledVector(barrel.normalize(), 0.0001);
+    const shot = { pierce: this.buffs.has('pierce'), blast: this.buffs.has('blast'), hit: false, exploded: false };
+    // Spread is relative to the sight plane, including when looking up/down.
+    const up = new THREE.Vector3().crossVectors(dir, this.right(new THREE.Vector3())).normalize();
     for (const angle of weapon.pellets) {
-      const pelletDir = dir.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
-      const tr = this.trace(origin.x, origin.z, pelletDir.x, pelletDir.z, piercing);
-      const end = origin.clone().addScaledVector(pelletDir, tr.dist);
-      end.y = tr.zombie ? (tr.zombie.demon ? 1.4 : tr.zombie.runner ? 0.85 : 0.95) : 1;
-      this.fx.tracer(muzzle, end);
-      const impacts = piercing ? tr.list : tr.list.slice(0, 1);
-      for (const { z, t } of impacts) {
-        const amount = weapon.id === 'shotgun' && t > 6 ? 0.4 : 1;
-        const previous = victims.get(z);
-        if (previous) previous.amount += amount;
-        else victims.set(z, { amount, dir: pelletDir });
-        if (!blastAt) blastAt = z.root.position.clone();
-      }
-      if (!tr.zombie && tr.dist < weapon.range) this.fx.spray(end, pelletDir.clone().negate(), 3, 'ink', 1.5);
+      this.ballistics.fire(muzzle, dir.clone().applyAxisAngle(up, angle), weapon, shot);
     }
     this.fx.muzzle(muzzle, camera);
     if (weapon.id === 'shotgun') this.fx.flash.scale.multiplyScalar(1.7);
     this.fx.shell(muzzle, this.right(new THREE.Vector3()));
     this.sfx.shot(weapon.id);
     this.hooks.shake(weapon.id === 'shotgun' ? 0.14 : 0.05);
-    if (!victims.size) return;
-    this.hits++; // Accuracy is measured per trigger, never per pellet.
-    for (const [z, hit] of victims) this.damage(z, hit.dir, hit.amount, weapon.knockback);
-    if (blastAt && this.buffs.has('blast')) {
-      this.fx.spray(blastAt.clone().setY(0.8), new THREE.Vector3(0, 1, 0), 18, 'ink', 4);
-      this.hooks.shake(0.16);
-      for (const z of this.pool) {
-        if (!this.targetable(z) || z.root.position.distanceToSquared(blastAt) > 2.2 ** 2) continue;
-        const push = z.root.position.clone().sub(blastAt).setY(0);
-        if (push.lengthSq() < 0.01) push.copy(dir); else push.normalize();
-        this.damage(z, push, 1);
-      }
-    }
   }
 
   damage(hitZ, dir, amount, knockback = 1) {
@@ -339,7 +246,8 @@ export class Round {
     hitZ.hp -= amount;
     hitZ.flash();
     if (hitZ.demon) this.encounter.takeHit();
-    hitZ.vel.addScaledVector(dir, (hitZ.demon ? 0.3 : hitZ.runner ? 2.2 : 1.6) * knockback);
+    const push = dir.clone().setY(0);
+    hitZ.vel.addScaledVector(push, (hitZ.demon ? 0.3 : hitZ.runner ? 2.2 : 1.6) * knockback);
     if (this.weapon.id === 'shotgun' && !hitZ.demon) { hitZ.biteT = 0; hitZ.biteCool = Math.max(hitZ.biteCool, 0.5); }
     this.fx.spray(end, dir, 5, Math.random() < 0.5 ? 'blood' : 'flesh', 2.4);
     const pan = THREE.MathUtils.clamp((end.x - h.root.position.x) * 0.1, -0.8, 0.8);
@@ -347,7 +255,7 @@ export class Round {
     // kill
     hitZ.dead = true;
     hitZ.deadT = 0;
-    hitZ.vel.addScaledVector(dir, 2.5);
+    hitZ.vel.addScaledVector(push, 2.5);
     this.kills++;
     if (hitZ.demon) this.encounter.defeated(this);
     else if (Math.random() < 0.2) this.buffs.drop(hitZ.root.position);
@@ -374,6 +282,7 @@ export class Round {
       this.pressure = Math.min(100, this.elapsed / TUNE.length * 75 + this.noise + (this.missed ? 100 : 0));
       this.time = Math.max(0, TUNE.length - this.elapsed);
       this.yaw += input.turn;
+      this.pitch = THREE.MathUtils.clamp(this.pitch + (input.pitch ?? 0), -1.05, 1.05);
 
       // move relative to facing
       const f = this.forward(_a).clone(), r = this.right(_b).clone();
@@ -393,7 +302,11 @@ export class Round {
         } else if (d < spacing && d > 1e-4) { hp.x = z.root.position.x + (dx / d) * spacing; hp.z = z.root.position.z + (dz / d) * spacing; }
       }
       this.collide(hp, 0.3);
-      this.resolveAim();
+      h.root.rotation.y = this.yaw;
+      h.aimPitch = this.pitch;
+      h.pose(0, walk);
+      this.hooks.camera?.();
+      this.resolveAim(camera);
 
       // weapon
       this.cool -= dt;
@@ -421,6 +334,7 @@ export class Round {
 
     this.updateZombies(dt, this.state === 'play' && dt > 0);
     if (dt > 0) this.encounter.update(dt, this, camera);
+    this.ballistics.update(dt);
     this.maxAlive = Math.max(this.maxAlive, this.alive);
   }
 
@@ -523,6 +437,7 @@ export class Round {
     if (this.state !== 'play') return;
     this.state = win ? 'win' : 'dead';
     this.encounter.cancelShots();
+    this.ballistics.clear();
     if (win) {
       this.sfx.win();
     }

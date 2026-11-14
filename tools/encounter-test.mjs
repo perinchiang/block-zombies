@@ -6,7 +6,8 @@ try {
   const page = await browser.newPage({ viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true });
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto('http://127.0.0.1:5191/?still'); await page.waitForFunction(() => window.__ready);
-  const results = await page.evaluate(() => {
+  const results = await page.evaluate(async () => {
+    const THREE = await import('/node_modules/three/build/three.module.js');
     const g = window.__game, R = g.round, camera = g.camera, E = R.encounter;
     const idle = { move: { x: 0, y: 0 }, turn: 0, firing: false };
     const checks = [], check = (label, pass) => checks.push({ label, pass: !!pass });
@@ -15,35 +16,56 @@ try {
       R.reset(weapon); R.start(); R.spawnT = 999;
       for (const z of R.pool) if (!demon || !z.demon) R.retire(z);
       R.hero.root.position.set(0, 0, -30); R.yaw = Math.PI;
+      R.hero.aimPitch = 0; R.hero.t = 0; R.hero.recoil = 0;
     };
-    const fire = () => { R.resolveAim(); R.fire(camera); };
-    reset(); const near = R.spawn(0, -31.2, false, false); fire();
+    const fire = target => {
+      const h = R.hero;
+      h.root.rotation.y = R.yaw; h.pose(0); R.scene.updateMatrixWorld(true);
+      camera.position.copy(h.muzzle.getWorldPosition(new THREE.Vector3()));
+      camera.lookAt(target ? R.chest(target, new THREE.Vector3()) : new THREE.Vector3(0, 1, -40));
+      camera.updateMatrixWorld(true); R.scene.updateMatrixWorld(true);
+      R.fire(camera);
+    };
+    const flight = () => { for (let i = 0; i < 50; i++) R.ballistics.update(0.02); };
+    reset(); const near = R.spawn(0, -31.8, false, false); fire(near);
+    check('shotgun damage waits for projectile travel', near.hp === 3 && R.hits === 0 && R.ballistics.active.length > 0);
+    const bullets = R.ballistics.active.map(p => ({ position: p.position.clone(), remaining: p.remaining }));
+    R.state = 'paused'; R.ballistics.update(1);
+    check('pause freezes every live pellet and prevents damage', near.hp === 3 && R.ballistics.active.length === bullets.length &&
+      R.ballistics.active.every((p, i) => p.position.equals(bullets[i].position) && p.remaining === bullets[i].remaining));
+    R.state = 'play'; flight();
     check('close shotgun burst kills a normal zombie', near.dead && R.ammo === 5);
     check('one trigger counts as one shot and hit', R.shots === 1 && R.hits === 1);
-    reset(); const targets = [-0.7, 0, 0.7].map(x => R.spawn(x, -33, false, false)); targets.forEach(z => z.hp = 20); fire();
+    reset(); const targets = [-0.6, 0, 0.6].map(x => R.spawn(x, -33, false, false));
+    targets.forEach(z => { z.hp = 20; z.t = 0; z.pose(0); }); fire(targets[1]); flight();
     check('fan hits multiple enemies and knocks them back', targets.every(z => z.hp < 20 && z.vel.length() > 4));
-    reset(); const mid = R.spawn(0, -32, false, false); mid.hp = 20; fire(); const nearDamage = 20 - mid.hp;
-    reset(); const far = R.spawn(0, -38, false, false); far.hp = 20; fire();
+    reset(); const mid = R.spawn(0, -32, false, false); mid.hp = 20; fire(mid); flight(); const nearDamage = 20 - mid.hp;
+    reset(); const far = R.spawn(0, -38, false, false); far.hp = 20; fire(far); flight();
     check('shotgun damage falls with range', 20 - far.hp < nearDamage);
-    reset(); const outside = R.spawn(0, -41, false, false); fire();
-    check('shotgun cannot hit past ten metres', outside.hp === 3 && !R.target);
-    reset('rifle'); const rifleFar = R.spawn(0, -41, false, false); fire();
+    reset(); const outside = R.spawn(0, -42, false, false); fire(outside); flight();
+    check('shotgun cannot hit past ten metres', outside.hp === 3 && R.ballistics.active.length === 0);
+    reset('rifle'); const rifleFar = R.spawn(0, -41, false, false); fire(rifleFar); flight();
     check('rifle still reaches distant targets', rifleFar.hp === 2 && R.ammo === 23);
     reset(); R.ammo = 1; R.update(0.02, { ...idle, firing: true }, camera);
     check('shotgun has its own reload duration', R.reloadT === 1.8 && R.ammo === 0);
     step(1.82); check('shotgun refills six shells', R.reloadT === 0 && R.ammo === 6);
     reset(); R.buffs.grant('frenzy'); R.reloadT = 1; R.update(0.02, { ...idle, firing: true }, camera);
     check('frenzy works with shotgun without converting its magazine', R.ammo === 6 && R.reloadT === 0 && Math.abs(R.cool - 1 / 2.4) < 1e-8);
-    reset(); R.buffs.grant('pierce'); const front = R.spawn(0, -32, false, false), back = R.spawn(0, -34, false, false); fire();
+    reset(); R.buffs.grant('pierce'); const front = R.spawn(0, -32, false, false), back = R.spawn(0, -34, false, false); fire(front); flight();
     check('piercing shotgun reaches enemy behind the front row', front.hp < 3 && back.hp < 3);
-    reset(); R.buffs.grant('blast'); const blasted = R.spawn(0, -31.2, false, false), aside = R.spawn(1.5, -31.2, false, false); fire();
+    reset(); R.buffs.grant('blast'); const blasted = R.spawn(0, -31.8, false, false), aside = R.spawn(1.5, -31.8, false, false); fire(blasted); flight();
     check('blast buff explodes even if direct pellets kill the target', blasted.dead && aside.hp === 2);
-    reset(); R.colliders.push({ x: 0, z: -31, r: 1 }); const blocked = R.spawn(0, -33, false, false); fire();
-    check('shotgun pellets respect scenery', blocked.hp === 3); R.colliders.pop();
+    reset();
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(4, 3, 0.2), new THREE.MeshBasicMaterial());
+    wall.position.set(0, 1.5, -31.5); R.scene.add(wall); R.ballistics.scenery.push(wall);
+    const blocked = R.spawn(0, -33, false, false); fire(blocked); flight();
+    check('shotgun pellets respect scenery meshes', blocked.hp === 3 && R.hits === 0);
+    R.ballistics.scenery.splice(R.ballistics.scenery.indexOf(wall), 1);
+    R.scene.remove(wall); wall.geometry.dispose(); wall.material.dispose();
 
     reset('rifle', true); R.hero.root.position.set(4.5, 0, -40); step(4);
     check('right-hand bypass does not wake the demon', !E.actor.alert && E.projectiles.every(p => !p.active));
-    R.hero.root.position.set(-4.7, 0, -20); R.yaw = Math.PI; fire(); E.actor.attackT = 0; step(0.1);
+    R.hero.root.position.set(-4.7, 0, -20); R.yaw = Math.PI; fire(E.actor); flight(); E.actor.attackT = 0; step(0.1);
     check('rifle range cannot damage the guard without provoking return fire', E.actor.hp < 36 && E.projectiles.some(p => p.active));
     R.hero.root.position.set(4.5, 0, 5); step(2.2);
     check('guard disengages when player leaves its range', !E.actor.alert);
@@ -67,7 +89,7 @@ try {
     check('demon death unlocks red crate and guarantees one buff', !rare.locked && E.actor.dead && R.buffs.drops.filter(d => d.mesh.visible).length === 1);
     check('demon death clears live attacks', E.projectiles.every(p => !p.active));
     R.hero.root.position.set(rare.x, 0, rare.z + 1); R.heroKick.set(0, 0, 0);
-    R.extraction.update(R, 1.51, idle); const coins = R.loot; R.extraction.update(R, 2, idle);
+    R.extraction.update(R, 0.02, idle); const coins = R.loot; R.extraction.update(R, 2, idle);
     check('rare crate pays 180 coins once', coins === 180 && R.loot === 180 && R.opened === 1);
     const bank = R.bank; R.finish(true);
     check('rare loot uses normal evacuation settlement', R.bank === bank + 180);

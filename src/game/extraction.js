@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { toon, flat } from '../render/toon.js';
 import { COL } from '../render/palette.js';
 
-export const EXTRACTION = { signal: 90, deadline: 240, hold: 5, open: 1.5 };
+export const EXTRACTION = { signal: 90, deadline: 240, hold: 5 };
 const POSITIONS = [[1.4, -19], [-2.3, -27], [2.4, -34], [-1.8, -42], [2.1, -48], [-2.2, -57], [-5.1, -42]];
 
 // Seed 7 street: supplies and exit are intentionally fixed for the M1 playtest.
@@ -24,6 +24,7 @@ export class Extraction {
       box(0.48, 0.15, 0.02, ink, 0, 0.4, 0.437, root);
       const marker = box(0.24, 0.24, 0.24, paper, 0, 1.55, 0, root);
       marker.rotation.z = Math.PI / 4;
+      marker.userData.noBulletCollision = true;
       const lock = new THREE.Group();
       if (rare) {
         box(0.45, 0.08, 0.9, ink, 0, 0.82, 0, lock);
@@ -55,7 +56,7 @@ export class Extraction {
     c.locked = false; c.lock.visible = false; c.marker.visible = true;
   }
 
-  update(round, dt, input) {
+  update(round, dt) {
     const p = round.hero.root.position;
     round.evacOpen = round.elapsed >= EXTRACTION.signal && round.elapsed < EXTRACTION.deadline;
     round.missed = round.elapsed >= EXTRACTION.deadline;
@@ -76,14 +77,11 @@ export class Extraction {
     }
     for (const c of this.crates) {
       if (c.opened || c.locked) continue;
-      if (c === round.nearbyCrate && !input.firing && Math.hypot(input.move.x, input.move.y) < 0.12 && round.heroKick.lengthSq() < 0.1) {
-        c.progress += dt;
-        if (c.progress >= EXTRACTION.open) {
-          c.opened = true; c.marker.visible = false; c.lid.rotation.x = -1.1;
-          round.loot += c.value; round.opened++;
-          round.notice = `物资入袋 +${c.value} 金币 · 撤离才可全部带走`; round.noticeT = 3;
-        }
-      } else c.progress = 0;
+      if (c === round.nearbyCrate && dt > 0) {
+        c.opened = true; c.marker.visible = false; c.lid.rotation.x = -1.1;
+        round.loot += c.value; round.opened++;
+        round.notice = `物资入袋 +${c.value} 金币 · 撤离才可全部带走`; round.noticeT = 3;
+      }
     }
     if (round.evacOpen && Math.hypot(p.x - this.evac.x, p.z - this.evac.z) <= this.evac.radius) {
       round.extracting = Math.min(EXTRACTION.hold, round.extracting + dt);
