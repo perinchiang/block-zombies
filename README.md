@@ -54,3 +54,5 @@ M2 回归：`node tools/encounter-test.mjs`（武器、预警与红箱结算）�
 - 技术：Vite + three.js，先验证手机网页版，之后再考虑上 TapTap。
 
 详见 `docs/GAME_DESIGN.md`（目标形态与开发顺序）、`docs/style.md`（画风规则）、`docs/round.md`（当前原型的规则与数值）。
+
+参考调研：[《迷你英雄》的刷怪、局内增益、武器与永久成长](docs/CALL_OF_MINI_RESEARCH.md)。含固定版本源码依据、升级与经济公式、与《僵尸危机3》的比较，以及固定入口＋地下出生对本项目的启发；属于研究记录，尚未改动游戏规则。
