@@ -19,6 +19,10 @@ class StorageFake {
   }
 }
 const snapshot = overrides => ({ version: 1, coins: 300, owned: ['rifle'], equipped: 'rifle', ...overrides });
+const finishCampaign = profile => {
+  assert.deepEqual(profile.completeDay(1, 0), { ok: true, credited: 0 });
+  assert.deepEqual(profile.completeDay(2, 0), { ok: true, credited: 0 });
+};
 
 test('weapon configurations are immutable and apply each upgrade exactly once', () => {
   assert.deepEqual(UPGRADE_COSTS, [0, 60, 120, 220]);
@@ -41,6 +45,26 @@ test('weapon configurations are immutable and apply each upgrade exactly once', 
   assert.throws(() => buildWeapon('__proto__'), RangeError);
 });
 
+test('v2 migration preserves exact wallet, ownership, equipment and all legacy levels', () => {
+  for (const rifle of [1, 2, 3, 4]) {
+    for (const shotgun of [1, 2, 3, 4]) {
+      const storage = new StorageFake();
+      const legacy = snapshot({ version: 2, coins: 1040, owned: ['rifle', 'shotgun'],
+        equipped: 'shotgun', levels: { rifle, shotgun } });
+      storage.setItem(PROFILE_KEY, JSON.stringify(legacy));
+      const profile = new Profile(storage);
+      assert.deepEqual(JSON.parse(storage.getItem(PROFILE_KEY)), { ...legacy, version: 3, completedDay: 0 });
+      assert.equal(profile.weaponLevel('rifle'), rifle);
+      assert.equal(profile.weaponLevel('shotgun'), shotgun);
+      assert.equal(profile.equip('shotgun'), true);
+      assert.equal(profile.coins, 1040);
+      const writes = storage.writes;
+      assert.equal(profile.refresh(), true);
+      assert.equal(storage.writes, writes);
+    }
+  }
+});
+
 test('v1 migration preserves wallet, ownership and equipment and persists base levels', () => {
   const storage = new StorageFake();
   storage.setItem(PROFILE_KEY, JSON.stringify(snapshot({ coins: 1040, owned: ['rifle', 'shotgun'], equipped: 'shotgun' })));
@@ -49,7 +73,9 @@ test('v1 migration preserves wallet, ownership and equipment and persists base l
   assert.equal(profile.equipped, 'shotgun');
   assert.equal(profile.weaponLevel('rifle'), 1);
   assert.equal(profile.weaponLevel('shotgun'), 1);
-  assert.equal(JSON.parse(storage.getItem(PROFILE_KEY)).version, 2);
+  assert.equal(JSON.parse(storage.getItem(PROFILE_KEY)).version, 3);
+  assert.equal(JSON.parse(storage.getItem(PROFILE_KEY)).completedDay, 0);
+  assert.equal(profile.equip('shotgun'), true);
   assert.deepEqual(JSON.parse(storage.getItem(PROFILE_KEY)).levels, { rifle: 1, shotgun: 1 });
 });
 
@@ -61,6 +87,7 @@ test('upgrades debit each tier, preserve equipment and cap both weapons at Lv4',
   assert.deepEqual(profile.upgrade('__proto__'), { ok: false, reason: 'weapon' });
   assert.deepEqual(profile.upgrade('rifle'), { ok: false, reason: 'funds' });
   profile.earn(1040);
+  finishCampaign(profile);
   profile.buy('shotgun');
   for (const id of ['rifle', 'shotgun']) {
     for (let level = 1; level < 4; level++) {
@@ -99,17 +126,54 @@ test('upgrade refreshes stale wallets and failed writes retain the whole session
 });
 
 test('unknown versions are never overwritten, including during unsaved session recovery', () => {
-  for (const dirty of [false, true]) {
+  for (const version of [0, 4, 99, '3']) {
+    for (const mode of ['cold', 'refresh', 'dirty']) {
+      const storage = new StorageFake();
+      let profile;
+      if (mode !== 'cold') {
+        profile = new Profile(storage);
+        if (mode === 'dirty') { storage.denyWrite = true; profile.earn(10); storage.denyWrite = false; }
+      }
+      const raw = JSON.stringify(snapshot({ version, coins: 12345 }));
+      storage.setItem(PROFILE_KEY, raw);
+      if (mode === 'cold') profile = new Profile(storage);
+      if (mode === 'refresh') profile.refresh();
+      // Dirty sessions skip refresh, so save itself must detect the unknown version.
+      profile.earn(300);
+      finishCampaign(profile);
+      profile.buy('shotgun');
+      profile.upgrade('shotgun');
+      profile.equip('shotgun');
+      assert.equal(storage.getItem(PROFILE_KEY), raw);
+      assert.equal(profile.persistent, false);
+    }
+  }
+});
+
+test('invalid v3 snapshots never partially replace wallet, levels or campaign progress', () => {
+  const invalid = [
+    ...[undefined, null, -1, 3, 1.5, '2', true, {}, []].map(completedDay => ({ completedDay })),
+    ...[null, [], {}, { rifle: 0 }, { rifle: 5 }, { rifle: '2' }, { rifle: 1, shotgun: 1 }].map(levels => ({ levels })),
+    { coins: -1 }, { owned: ['rifle', 'rifle'] }, { equipped: 'shotgun' },
+  ];
+  for (const overrides of invalid) {
     const storage = new StorageFake(), profile = new Profile(storage);
-    if (dirty) { storage.denyWrite = true; profile.earn(10); storage.denyWrite = false; }
-    const raw = JSON.stringify(snapshot({ version: 99, coins: 12345 }));
+    profile.earn(180);
+    profile.upgrade('rifle');
+    profile.completeDay(1, 30);
+    const raw = JSON.stringify(snapshot({ version: 3, levels: { rifle: 1 }, completedDay: 0, ...overrides }));
     storage.setItem(PROFILE_KEY, raw);
-    profile.refresh();
-    profile.earn(300);
-    profile.buy('shotgun');
-    profile.upgrade('shotgun');
-    assert.equal(storage.getItem(PROFILE_KEY), raw);
+    const writes = storage.writes;
+    assert.equal(profile.refresh(), false, raw);
+    assert.equal(storage.writes, writes);
+    assert.equal(profile.coins, 150);
+    assert.equal(profile.weaponLevel('rifle'), 2);
+    assert.equal(profile.completedDay, 1);
     assert.equal(profile.persistent, false);
+    const cold = new Profile(storage);
+    assert.equal(cold.completedDay, 0);
+    assert.equal(cold.coins, 0);
+    assert.equal(cold.persistent, false);
   }
 });
 
@@ -134,12 +198,17 @@ test('cold start exposes the free rifle and versioned storage key', () => {
   assert.equal(profile.owns('rifle'), true);
   assert.equal(profile.owns('shotgun'), false);
   assert.equal(profile.persistent, true);
+  assert.equal(profile.completedDay, 0);
+  assert.equal(profile.currentDay, 1);
+  assert.equal(profile.campaignComplete, false);
   assert.equal(storage.writes, 0);
 });
 
 test('funds, purchases, ownership, equipment and atomic snapshot reload', () => {
   const storage = new StorageFake();
   const profile = new Profile(storage);
+  assert.deepEqual(profile.buy('shotgun'), { ok: false, reason: 'locked' });
+  finishCampaign(profile);
   assert.deepEqual(profile.buy('shotgun'), { ok: false, reason: 'funds' });
   assert.equal(profile.equip('shotgun'), false);
   for (const id of ['unknown', '__proto__', 'toString', null, {}, 1]) {
@@ -151,9 +220,9 @@ test('funds, purchases, ownership, equipment and atomic snapshot reload', () => 
   assert.deepEqual(profile.buy('shotgun'), { ok: true });
   assert.equal(profile.coins, 60);
   assert.equal(profile.equip('shotgun'), true);
-  assert.equal(storage.writes, 3);
+  assert.equal(storage.writes, 5);
   assert.equal(storage.values.size, 1);
-  assert.deepEqual(JSON.parse(storage.getItem(PROFILE_KEY)), snapshot({ version: 2, coins: 60, owned: ['rifle', 'shotgun'], equipped: 'shotgun', levels: { rifle: 1, shotgun: 1 } }));
+  assert.deepEqual(JSON.parse(storage.getItem(PROFILE_KEY)), snapshot({ version: 3, coins: 60, owned: ['rifle', 'shotgun'], equipped: 'shotgun', levels: { rifle: 1, shotgun: 1 }, completedDay: 2 }));
   const restored = new Profile(storage);
   assert.equal(restored.coins, 60);
   assert.equal(restored.owns('shotgun'), true);
@@ -162,7 +231,7 @@ test('funds, purchases, ownership, equipment and atomic snapshot reload', () => 
   assert.deepEqual(restored.buy('shotgun'), { ok: false, reason: 'owned' });
   assert.deepEqual(restored.buy('rifle'), { ok: false, reason: 'owned' });
   assert.equal(restored.coins, 60);
-  assert.equal(storage.writes, 3);
+  assert.equal(storage.writes, 5);
 });
 
 test('corrupt, unknown, invalid version and inconsistent snapshots are rejected', () => {
@@ -199,6 +268,7 @@ test('denied reads and writes allow session progress and preserve it on refresh'
   const profile = new Profile(storage);
   assert.equal(profile.persistent, false);
   assert.equal(profile.earn(300), 300);
+  finishCampaign(profile);
   assert.deepEqual(profile.buy('shotgun'), { ok: true });
   assert.equal(profile.equip('shotgun'), true);
   assert.equal(profile.persistent, false);
@@ -222,6 +292,7 @@ test('a failed write after successful load cannot roll back session progress', (
   const storage = new StorageFake();
   storage.setItem(PROFILE_KEY, JSON.stringify(snapshot({})));
   const profile = new Profile(storage);
+  finishCampaign(profile);
   storage.denyWrite = true;
   assert.deepEqual(profile.buy('shotgun'), { ok: true });
   assert.equal(profile.persistent, false);
@@ -238,6 +309,7 @@ test('default storage access is safe when absent or its getter throws', () => {
       const profile = new Profile();
       assert.equal(profile.persistent, false);
       assert.equal(profile.earn(240), 240);
+      finishCampaign(profile);
       assert.deepEqual(profile.buy('shotgun'), { ok: true });
       assert.equal(profile.equip('shotgun'), true);
       profile.refresh();
@@ -248,6 +320,120 @@ test('default storage access is safe when absent or its getter throws', () => {
     if (descriptor) Object.defineProperty(globalThis, 'localStorage', descriptor);
     else delete globalThis.localStorage;
   }
+});
+
+test('campaign advances exactly once per day and saves bonus with progress in one snapshot', () => {
+  const storage = new StorageFake(), profile = new Profile(storage);
+  profile.earn(12); // Immediate kill income.
+  profile.earn(8); // Actual pickup income.
+  const writes = storage.writes;
+  assert.deepEqual(profile.completeDay(2, 999), { ok: false, credited: 0 });
+  assert.equal(storage.writes, writes);
+  assert.deepEqual(profile.completeDay(1, 30), { ok: true, credited: 30 });
+  assert.equal(storage.writes, writes + 1);
+  assert.equal(profile.coins, 50);
+  assert.equal(profile.completedDay, 1);
+  assert.equal(profile.currentDay, 2);
+  assert.equal(profile.campaignComplete, false);
+  assert.deepEqual(JSON.parse(storage.getItem(PROFILE_KEY)), snapshot({
+    version: 3, coins: 50, levels: { rifle: 1 }, completedDay: 1,
+  }));
+  assert.deepEqual(profile.completeDay(1, 30), { ok: false, credited: 0 });
+  assert.deepEqual(profile.completeDay(2, 40), { ok: true, credited: 40 });
+  assert.equal(profile.coins, 90);
+  assert.equal(profile.currentDay, 2);
+  assert.equal(profile.campaignComplete, true);
+  const doneWrites = storage.writes;
+  for (const day of [1, 2, 3]) assert.deepEqual(profile.completeDay(day, 100), { ok: false, credited: 0 });
+  assert.equal(storage.writes, doneWrites);
+  assert.equal(new Profile(storage).completedDay, 2);
+});
+
+test('completion validates inputs and advances even with zero or capped bonus', () => {
+  const storage = new StorageFake(), profile = new Profile(storage);
+  for (const bonus of [-1, 1.5, NaN, Infinity, '20', null, undefined, {}, 1n, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.deepEqual(profile.completeDay(1, bonus), { ok: false, credited: 0 });
+  }
+  for (const day of [0, -1, 3, 1.5, '1', null, undefined, NaN, Infinity, {}, 1n]) {
+    assert.deepEqual(profile.completeDay(day, 20), { ok: false, credited: 0 });
+  }
+  assert.equal(storage.writes, 0);
+  assert.equal(profile.completedDay, 0);
+  profile.earn(999_999);
+  assert.deepEqual(profile.completeDay(1, Number.MAX_SAFE_INTEGER), { ok: true, credited: 1 });
+  assert.deepEqual(profile.completeDay(2, 50), { ok: true, credited: 0 });
+  assert.equal(new Profile(storage).coins, 1_000_000);
+  assert.equal(new Profile(storage).completedDay, 2);
+});
+
+test('shotgun purchase needs Day 2 and funds; owned legacy shotgun remains usable', () => {
+  const storage = new StorageFake(), profile = new Profile(storage);
+  assert.equal(profile.unlocked('rifle'), true);
+  assert.equal(profile.canBuy('rifle'), false);
+  profile.earn(240);
+  for (const day of [0, 1]) {
+    assert.equal(profile.completedDay, day);
+    assert.equal(profile.unlocked('shotgun'), false);
+    assert.equal(profile.canBuy('shotgun'), false);
+    const writes = storage.writes;
+    assert.deepEqual(profile.buy('shotgun'), { ok: false, reason: 'locked' });
+    assert.equal(storage.writes, writes);
+    if (day === 0) profile.completeDay(1, 0);
+  }
+  profile.completeDay(2, 0);
+  assert.equal(profile.unlocked('shotgun'), true);
+  assert.equal(profile.canBuy('shotgun'), true);
+  assert.deepEqual(profile.buy('shotgun'), { ok: true });
+  assert.equal(profile.canBuy('shotgun'), false);
+  for (const id of ['__proto__', 'toString', null, {}]) {
+    assert.equal(profile.unlocked(id), false);
+    assert.equal(profile.canBuy(id), false);
+  }
+  storage.setItem(PROFILE_KEY, JSON.stringify(snapshot({ version: 2, coins: 60,
+    owned: ['rifle', 'shotgun'], equipped: 'shotgun', levels: { rifle: 4, shotgun: 3 } })));
+  const legacy = new Profile(storage);
+  assert.equal(legacy.completedDay, 0);
+  assert.equal(legacy.equip('shotgun'), true);
+  assert.deepEqual(legacy.upgrade('shotgun'), { ok: false, reason: 'funds' });
+  legacy.earn(160);
+  assert.deepEqual(legacy.upgrade('shotgun'), { ok: true });
+  assert.equal(legacy.weaponLevel('shotgun'), 4);
+  assert.equal(legacy.coins, 0);
+});
+
+test('stale tabs refresh campaign gates and reject duplicate completion bonuses', () => {
+  const storage = new StorageFake(), first = new Profile(storage), stale = new Profile(storage);
+  first.completeDay(1, 100);
+  const writes = storage.writes;
+  assert.deepEqual(stale.completeDay(1, 100), { ok: false, credited: 0 });
+  assert.equal(storage.writes, writes);
+  assert.equal(stale.coins, 100);
+  assert.deepEqual(stale.completeDay(2, 140), { ok: true, credited: 140 });
+  assert.deepEqual(first.buy('shotgun'), { ok: true });
+  assert.equal(first.completedDay, 2);
+  assert.equal(first.coins, 0);
+  assert.deepEqual(stale.completeDay(2, 140), { ok: false, credited: 0 });
+  assert.equal(stale.coins, 0);
+  assert.equal(stale.owns('shotgun'), true);
+});
+
+test('failed completion writes retain bonus and progress together until session recovery', () => {
+  const storage = new StorageFake(), profile = new Profile(storage);
+  profile.earn(20);
+  storage.denyWrite = true;
+  assert.deepEqual(profile.completeDay(1, 30), { ok: true, credited: 30 });
+  assert.equal(profile.persistent, false);
+  assert.equal(profile.refresh(), false);
+  assert.equal(profile.completedDay, 1);
+  assert.equal(profile.coins, 50);
+  assert.equal(new Profile(storage).completedDay, 0);
+  assert.deepEqual(profile.completeDay(1, 30), { ok: false, credited: 0 });
+  storage.denyWrite = false;
+  profile.earn(1);
+  const restored = new Profile(storage);
+  assert.equal(restored.completedDay, 1);
+  assert.equal(restored.coins, 51);
+  assert.deepEqual(restored.completeDay(1, 30), { ok: false, credited: 0 });
 });
 
 test('credits reject malformed amounts and clamp safely at the coin cap', () => {
@@ -270,6 +456,7 @@ test('stale tabs reconcile purchases before equip, purchase and settlement', () 
   const storage = new StorageFake();
   const first = new Profile(storage);
   first.earn(300);
+  finishCampaign(first);
   const stale = new Profile(storage);
   first.buy('shotgun');
   first.equip('shotgun');
@@ -291,6 +478,7 @@ test('refresh loads cross-tab snapshots and preserves current state on invalid r
   const profile = new Profile(storage);
   const other = new Profile(storage);
   other.earn(250);
+  finishCampaign(other);
   other.buy('shotgun');
   other.equip('shotgun');
   assert.equal(profile.refresh(), true);

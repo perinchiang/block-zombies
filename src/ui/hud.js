@@ -10,6 +10,9 @@ export class Hud {
     this.hp = $('.hp', this.el);
     this.clock = $('.clock', this.el);
     this.kills = $('.kills b', this.el);
+    this.coins = $('.coins b', this.el);
+    this.coinPulse = $('.coin-pulse', this.el);
+    this.notice = $('.notice', this.el);
     this.ammo = $('.ammo b', this.el);
     this.ammoMax = $('.ammo', this.el);
     this.reload = $('.reload', this.el);
@@ -26,7 +29,9 @@ export class Hud {
     this.last = {};
     this.selectedWeapon = 'rifle';
     this.tutorialSeen = false;
-    try { this.tutorialSeen = localStorage.getItem('block-zombies:tutorial-seen') === '1'; } catch { /* Private browsing can disable storage. */ }
+    try { this.tutorialSeen = localStorage.getItem('block-zombies:tutorial-seen-v2') === '1'; } catch { /* Private browsing can disable storage. */ }
+    this.lastCoinSerial = -1;
+    this.coinPulseT = 0;
     this.hp.innerHTML = '<span></span>'.repeat(TUNE.hearts);
     this.ammoMax.innerHTML = `<b>${TUNE.mag}</b>/${TUNE.mag}`;
     this.ammo = $('.ammo b', this.el);
@@ -43,12 +48,28 @@ export class Hud {
   update(round, dt, crossXY) {
     this.set('hp', round.hp, (v) => [...this.hp.children].forEach((s, i) => s.classList.toggle('off', i >= v)));
     this.updateMission(round);
-    const sec = Math.max(0, Math.ceil(round.time));
-    this.set('clock', sec, (v) => {
-      this.clock.textContent = `${Math.floor(v / 60)}:${String(v % 60).padStart(2, '0')}`;
-      this.clock.classList.toggle('hot', v <= 10);
+    const day = round.day ?? this.profile?.currentDay ?? 1;
+    const wave = Math.min((round.waveIndex ?? 0) + 1, round.waveCount ?? 1);
+    const clockKey = `${round.mode}:${day}:${wave}/${round.waveCount ?? 1}`;
+    this.set('clock', clockKey, () => {
+      this.clock.textContent = `${round.mode === 'challenge' ? '金币挑战' : `Day ${day}`} · 波 ${wave}/${round.waveCount ?? 1}`;
+      this.clock.classList.remove('hot');
     });
     this.set('kills', round.kills, (v) => (this.kills.textContent = v));
+    const notice = round.noticeT > 0 ? (round.notice ?? round.waveNotice ?? '') : '';
+    this.set('notice', notice, (v) => { if (this.notice) { this.notice.textContent = v; this.notice.hidden = !v; } });
+    const wallet = this.profile?.coins ?? round.bank ?? 0;
+    this.set('wallet', wallet, (v) => { if (this.coins) this.coins.textContent = v; });
+    const pulse = round.coinPulse;
+    if (pulse && pulse.serial !== this.lastCoinSerial) {
+      this.lastCoinSerial = pulse.serial;
+      if (this.coinPulse) {
+        this.coinPulse.textContent = `+${pulse.amount}`;
+        this.coinPulse.classList.remove('show');
+        void this.coinPulse.offsetWidth;
+        this.coinPulse.classList.add('show');
+      }
+    }
     this.set('ammoMax', round.weapon?.mag ?? TUNE.mag, (v) => (this.ammoMax.lastChild.textContent = `/${v}`));
     this.set('ammo', round.ammo, (v) => (this.ammo.textContent = Math.max(0, v)));
     this.set('reload', round.reloadT > 0, (v) => (this.reload.hidden = !v));
@@ -62,8 +83,7 @@ export class Hud {
     const atEvac = round.evacOpen && round.evac && Math.hypot(round.evac.x - h.x, round.evac.z - h.z) <= round.evac.radius;
     this.interaction.hidden = round.state !== 'play' || round.missed || !atEvac;
     if (!this.interaction.hidden) {
-      $('progress', this.interaction).value = Math.max(0, Math.min(1, round.extracting / 5));
-      $('progress', this.interaction).setAttribute('aria-label', '撤离进度');
+      this.interaction.hidden = true;
     }
     const names = { frenzy: '狂热', pierce: '穿甲', blast: '爆裂', sprint: '疾走', shield: '墨盾' };
     const active = Object.entries(names).filter(([key]) => round.buffTimers?.[key] > 0).slice(0, 2);
@@ -120,6 +140,7 @@ export class Hud {
       const upgradePrice = UPGRADE_COSTS[level];
       const stats = config => `伤害 ×${config.damageMultiplier} · 弹匣 ${config.mag} · 换弹 ${Number(config.reload.toFixed(4))}秒`;
       const price = SHOP_PRICES[weapon.id];
+      const shotgunLocked = weapon.id === 'shotgun' && !owned && (this.profile.completedDay ?? 0) < 2;
       const remaining = Math.max(0, price - this.profile.coins);
       return `<article class="weapon-product">
         <h2>${weapon.name} <span class="weapon-level">Lv.${level}</span></h2><p>${weapon.description}</p>
@@ -128,7 +149,7 @@ export class Hud {
           <button class="shop-upgrade" type="button" data-weapon="${weapon.id}" data-level="${level}" ${this.profile.coins < upgradePrice ? 'disabled' : ''}>升级 Lv.${level + 1} · ${upgradePrice} 金币${this.profile.coins < upgradePrice ? `（还差 ${upgradePrice - this.profile.coins}）` : ''}</button>` : '<p class="weapon-next">已满级 · 永久保留</p>' : ''}
         <p class="weapon-price">${price === 0 ? '免费 · 已拥有' : owned ? '已拥有' : `${price} 金币`}</p>
         ${owned ? `<button class="weapon-choice" type="button" data-weapon="${weapon.id}" aria-pressed="${this.selectedWeapon === weapon.id}">${this.selectedWeapon === weapon.id ? '已选择' : '选择装备'}</button>` : `<div class="shop-actions">
-          <button class="shop-buy" type="button" data-weapon="${weapon.id}" ${remaining ? 'disabled' : ''}>${remaining ? `还差 ${remaining} 金币` : `购买 · ${price} 金币`}</button>
+          <button class="shop-buy" type="button" data-weapon="${weapon.id}" ${shotgunLocked || remaining ? 'disabled' : ''}>${shotgunLocked ? 'Day 2 完成后解锁' : remaining ? `还差 ${remaining} 金币` : `购买 · ${price} 金币`}</button>
           <button class="shop-trial" type="button" data-weapon="${weapon.id}">免费试用</button>
         </div>`}
       </article>`;
@@ -143,28 +164,30 @@ export class Hud {
     this.profile.refresh();
     this.selectedWeapon = this.profile.owns(this.profile.equipped) ? this.profile.equipped : 'rifle';
     let started = false;
-    const start = (id, trial) => {
-      if (started) return;
+    const start = (id, trial, mode = 'campaign') => {
+      if (started || (!trial && mode === 'campaign' && (this.profile.campaignComplete === true || (this.profile.completedDay ?? 0) >= 2))) return;
       started = true;
       this.panel.hidden = true;
       this.tutorialSeen = true;
-      try { localStorage.setItem('block-zombies:tutorial-seen', '1'); } catch { /* Keep the in-memory flag for this session. */ }
-      onGo(id, { trial });
+      try { localStorage.setItem('block-zombies:tutorial-seen-v2', '1'); } catch { /* Keep the in-memory flag for this session. */ }
+      onGo(id, { trial, mode });
     };
+    const completed = this.profile.campaignComplete === true || this.profile.completedDay >= 2;
+    const day = Math.min((this.profile.completedDay ?? 0) + 1, 2);
     this.card(`
       <div class="shop-heading"><h1>方块<span class="r">尸潮</span></h1><p class="wallet">存款 <b>${this.profile.coins}</b> 金币</p></div>
       ${this.tutorialSeen ? '' : `<div class="rules tutorial">
         <span class="touch-hint">左侧移动 · 右侧上下左右瞄准 · 按住开火也能拖动瞄准</span><span class="desktop-hint">WASD 移动 · 鼠标上下左右瞄准 · 左键开火</span><br>
-        对准屏幕中心开火，无自动瞄准；远处移动目标需提前量<br>
-        靠近自动开箱、收金币，移动开火也能拾取；红箱先击败恶魔<br>
-        撤离车 90 秒到中央广场，4 分钟离开；车门旁累计登车 5 秒<br>
-        撤离带走全部金币，失败保留 25%
+        击倒敌人直接获得金币；特殊金币包会自动拾取<br>
+        清除全部波次即可完成挑战；死亡时本局已赚金币仍会保留
       </div>`}
       ${this.weaponChoices()}
-      ${this.profile.owns('shotgun') ? '' : '<p class="trial-note">免费试用固定 Lv.1，不能升级：整局收益为 0，撤离也不获得金币。</p>'}
+      ${this.profile.owns('shotgun') ? '' : '<p class="trial-note">霰弹枪可免费试用：固定 Lv.1，本局无进度、无奖励。</p>'}
       ${this.profile.persistent ? '<p class="save-note">金币、已购武器和永久等级自动保存在当前浏览器</p>' : this.storageWarning()}
-      <button class="btn" type="button">进入街道</button>`, () => start(this.selectedWeapon, false));
+      <button class="shop-challenge" type="button">金币挑战 · 可重复 · 通关共 150 金币</button>
+      <button class="btn" type="button" ${completed ? 'disabled' : ''}>${completed ? 'Day 1–2 已完成，后续关卡制作中' : `挑战 Day ${day}`}</button>`, () => start(this.selectedWeapon, false));
     $('.card', this.panel).classList.add('shop-card');
+    this.panel.querySelector('.shop-challenge').addEventListener('click', () => start(this.selectedWeapon, false, 'challenge'));
     this.panel.querySelectorAll('.weapon-choice').forEach((button) => button.addEventListener('click', () => this.title(onGo)));
     this.panel.querySelectorAll('.shop-buy').forEach((button) => button.addEventListener('click', () => {
       if (started || this.panel.hidden || button.disabled) return;
@@ -192,10 +215,13 @@ export class Hud {
   pause(round, onResume) {
     const names = { frenzy: '狂热', pierce: '穿甲', blast: '爆裂', sprint: '疾走', shield: '墨盾' };
     const active = Object.entries(names).filter(([key]) => round.buffTimers[key] > 0);
+    const income = round.income ?? { kills: 0, pickups: 0, completion: 0 };
+    const day = round.day ?? this.profile?.currentDay ?? 1;
     this.card(`
       <h1>暂停</h1>
-      <p>本局物资 · ${round.weapon?.name ?? WEAPONS.rifle.name} · Lv.${round.weapon?.level ?? 1}${round.trial ? ' · 试用局（收益为 0）' : ''}</p>
-      <div class="stats"><div><b>${round.loot}</b>携带金币</div><div><b>${round.opened} / ${round.crates.length}</b>已开物资箱</div></div>
+      <p>${round.weapon.name} · Lv.${round.weapon.level}</p>
+      <p>${round.mode === 'challenge' ? '金币挑战' : `Day ${day}`} · 波 ${(round.waveIndex ?? 0) + 1}/${round.waveCount ?? 1}${round.trial ? ' · 试用局（收益为 0）' : ''}</p>
+      <div class="stats"><div><b>${round.kills}</b>击倒</div><div><b>${income.kills ?? 0}</b>击倒收入</div><div><b>${income.pickups ?? 0}</b>拾取收入</div><div><b>${this.profile?.coins ?? round.bank ?? 0}</b>当前存款</div></div>
       ${active.length ? `<p class="pause-buffs">${active.map(([key, name]) => `${name} · ${Math.ceil(round.buffTimers[key])} 秒`).join('　')}</p>` : ''}
       <p class="lock-hint" hidden aria-live="polite"></p>
       <button class="btn" type="button">继续游戏</button>`, onResume, true);
@@ -224,11 +250,11 @@ export class Hud {
   result(win, s, onGo) {
     const acc = s.shots ? Math.round((s.hits / s.shots) * 100) : 0;
     this.card(`
-      <h1>${win ? '撤离成功' : '<span class="r">未能撤离</span>'}</h1>
-      <p>${s.reason === 'missed' ? '错过末班车' : win ? (s.trial ? '赶上撤离车' : '赶上撤离车，金币全部带走') : '倒在街头'} · ${Math.floor(s.time ?? 0)} 秒</p>
-      <div class="stats"><div><b>${s.loot ?? 0}</b>搜刮金币</div><div><b>${s.trial ? 0 : s.carried ?? (win ? s.loot ?? 0 : Math.floor((s.loot ?? 0) * 0.25))}</b>${s.trial ? '试用收益' : `带出 ${win ? '100%' : '25%（向下取整）'}`}</div><div><b>${this.profile?.coins ?? s.bank ?? 0}</b>存款</div></div>
-      <p class="combat-stats">开箱 ${s.opened ?? 0} · 击倒 ${s.kills} · 命中 ${acc}% · 剩余血量 ${s.hp}</p>
-      ${s.trial ? '<p class="trial-note">试用局整局收益为 0，搜刮金币不计入存款。</p>' : ''}
+      <h1>${win ? '挑战完成' : '<span class="r">挑战失败</span>'}</h1>
+      <p>${s.mode === 'challenge' ? '金币挑战' : `Day ${s.day ?? 1}`} · ${s.reason === 'cleared' ? '清除全部波次' : '倒在街头'} · ${Math.floor(s.time ?? 0)} 秒</p>
+      <div class="stats"><div><b>${s.income?.kills ?? 0}</b>击倒收入</div><div><b>${s.income?.pickups ?? 0}</b>拾取收入</div><div><b>${s.income?.completion ?? 0}</b>完成收入</div><div><b>${s.carried ?? 0}</b>本局合计</div><div><b>${s.bank ?? this.profile?.coins ?? 0}</b>当前存款</div></div>
+      <p class="combat-stats">击倒 ${s.kills} · 命中 ${acc}% · 剩余血量 ${s.hp}${s.trial ? ' · 试用局' : ''}</p>
+      ${s.trial ? '<p class="trial-note">试用局不计进度或奖励。</p>' : '<p class="trial-note">本局已计入存款，无需再次领取。</p>'}
       ${this.storageWarning()}
       <button class="btn" type="button">返回商店</button>`, () => onGo());
   }

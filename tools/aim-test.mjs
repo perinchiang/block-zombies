@@ -66,13 +66,6 @@ try {
     R.ballistics.scenery.pop(); R.scene.remove(cylinder); cylinder.geometry.dispose(); cylinder.material.dispose();
 
     muzzle = reset(); far = R.spawn(muzzle.x, -17, false, false);
-    const crate = R.crates[0]; const cratePosition = crate.root.position.clone();
-    crate.root.position.set(muzzle.x, 0.6, -11);
-    aim(muzzle, new THREE.Vector3(muzzle.x, 1.1, -17)); R.fire(camera); advance();
-    check('supply crate meshes block bullets', far.hp === 3);
-    crate.root.position.copy(cratePosition);
-
-    muzzle = reset(); far = R.spawn(muzzle.x, -17, false, false);
     aim(new THREE.Vector3(muzzle.x, 1, -4), new THREE.Vector3(muzzle.x, 1, -17));
     const behind = R.spawn(muzzle.x, -5, false, false);
     R.fire(camera);
@@ -93,8 +86,8 @@ try {
     const position = R.ballistics.active[0].position.clone();
     R.state = 'paused'; R.ballistics.update(1);
     check('pause freezes bullet and target', R.ballistics.active[0].position.equals(position) && far.hp === 3);
-    R.state = 'play'; R.finish(true);
-    check('settlement clears bullets', R.ballistics.active.length === 0);
+    R.state = 'play'; R.ballistics.clear();
+    check('round cleanup clears bullets', R.ballistics.active.length === 0);
     R.reset(); check('retry clears bullets and restores initial pitch', R.ballistics.active.length === 0 && R.pitch === -0.18);
     R.start(); R.spawnTick = () => {}; R.pool.forEach(z => R.retire(z));
     const idle = { move: { x: 0, y: 0 }, turn: 0, firing: false };

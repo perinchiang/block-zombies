@@ -1,16 +1,16 @@
 import * as THREE from 'three';
 import { BlockMan } from '../actor/blockman.js';
 import { resolvePosition, nextWaypoint } from '../world/navigation.js';
-import { SpawnDirector } from './spawn-director.js';
-import { Extraction, EXTRACTION } from './extraction.js';
+import { CampaignDirector, getDay } from './campaign.js';
+import { CoinDrops } from './coin-drops.js';
 import { Buffs } from './buffs.js';
 import { WEAPONS, buildWeapon } from './weapons.js';
 import { DemonEncounter } from './demon-encounter.js';
 import { Ballistics } from './ballistics.js';
 
-// Central-square extraction playtest. Combat tuning stays here.
+// Day campaign foundation: fixed waves, immediate rewards and durable progression.
 export const TUNE = {
-  length: EXTRACTION.deadline,
+  length: 180, // target duration, never a survival timer or win condition
   hearts: 5,
   heroSpeed: 3.4,
   heroSpeedFiring: 2.6,
@@ -52,22 +52,24 @@ export class Round {
     this.encounter = new DemonEncounter(scene);
     this.pool.push(this.encounter.actor);
     this.weapon = WEAPONS.rifle;
-    this.extraction = new Extraction(scene);
-    this.director = new SpawnDirector(scene);
-    this.crates = this.extraction.crates;
-    this.evac = this.extraction.evac;
+    this.director = new CampaignDirector();
+    this.coinDrops = new CoinDrops(scene);
     this.profile = profile;
     this.bank = profile?.coins ?? 0;
     this.buffs = new Buffs(scene);
     this.buffTimers = this.buffs.timers;
     this.aimInfo = { zombie: null, point: new THREE.Vector3(), blocked: false };
-    this.ballistics = new Ballistics(this, [...scenery, ...this.crates.map(c => c.root), this.extraction.vehicle]);
+    this.ballistics = new Ballistics(this, scenery);
     this.state = 'idle';
     this.reset();
   }
 
-  reset(weaponId = this.weapon.id, { trial = false } = {}) {
+  reset(weaponId = this.weapon.id, { trial = false, mode = 'campaign' } = {}) {
     this.trial = trial;
+    this.mode = mode === 'challenge' ? 'challenge' : 'campaign';
+    this.profile?.refresh();
+    this.day = this.mode === 'challenge' ? 2 : (this.profile?.currentDay ?? 1);
+    this.dayConfig = getDay(this.day);
     if (this.profile) this.bank = this.profile.coins;
     this.weapon = buildWeapon(Object.hasOwn(WEAPONS, weaponId) ? weaponId : 'rifle', trial ? 1 : Math.max(1, this.profile?.weaponLevel(weaponId) ?? 1));
     const h = this.hero;
@@ -86,17 +88,15 @@ export class Round {
     this.elapsed = 0;
     this.kills = 0;
     this.loot = 0;
-    this.opened = 0;
+    this.income = { kills: 0, pickups: 0, completion: 0 };
+    this.coinPulse = { serial: 0, amount: 0, kind: '' };
     this.pressure = 0;
     this.noise = 0;
-    this.extracting = 0;
-    this.evacOpen = this.missed = this.signaled = this.departed = false;
-    this.nearbyCrate = null;
-    this.notice = '靠近带十字标记的物资箱，自动拾取物资';
-    this.noticeT = 7;
-    this.extraction.reset();
-    this.vehiclePresent = false; this.colliders = this.staticColliders;
-    this.director.reset();
+    this.notice = `${this.mode === 'challenge' ? '金币挑战' : `Day ${this.day}`}：清理所有波次，击杀金币直接到账`;
+    this.noticeT = 5;
+    this.colliders = this.staticColliders;
+    this.director.reset(this.day);
+    this.coinDrops.clear();
     this.buffs.reset();
     this.shots = 0;
     this.hits = 0;
@@ -110,14 +110,29 @@ export class Round {
     this.aimInfo.zombie = null;
     this.heroKick = new THREE.Vector3();
     for (const z of this.pool) this.retire(z);
-    this.encounter.reset();
+    this.encounter.cancelShots();
     this.fx.clearDecals();
-    // One visible slow target leads toward the first supply crate.
-    this.spawn(0, -10, false, false);
     this.resolveAim();
   }
 
-  start() { this.state = 'play'; }
+  start() {
+    if (!this.trial && this.mode === 'campaign' && this.profile?.campaignComplete) { this.state = 'shop'; return false; }
+    this.state = 'play'; return true;
+  }
+
+  get waveIndex() { return this.director.waveIndex; }
+  get waveCount() { return this.director.waveCount; }
+  get remainingEnemies() { return this.director.remaining(this); }
+
+  awardCoins(kind, amount) {
+    if (this.state !== 'play' || this.trial || !['kills', 'pickups'].includes(kind) || !Number.isSafeInteger(amount) || amount <= 0) return 0;
+    const credited = this.profile ? this.profile.earn(amount) : amount;
+    this.bank = this.profile ? this.profile.coins : this.bank + credited;
+    this.income[kind] += credited;
+    this.loot += credited;
+    this.coinPulse = { serial: this.coinPulse.serial + 1, amount: credited, kind };
+    return credited;
+  }
 
   get alive() { return this.pool.filter((z) => z.active && !z.dead).length; }
 
@@ -126,6 +141,7 @@ export class Round {
     z.active = false;
     z.dead = false;
     z.root.visible = false;
+    if (z.bountyMarker) z.bountyMarker.visible = false;
   }
 
   spawn(x, zPos, runner, rise = true) {
@@ -141,7 +157,15 @@ export class Round {
     z.rise = rise ? 0 : 1;
     z.runner = runner;
     z.hp = runner ? TUNE.runnerHp : TUNE.zombieHp;
-    z.speed = (runner ? TUNE.runnerSpeed : THREE.MathUtils.lerp(TUNE.walkSpeed[0], TUNE.walkSpeed[1], Math.random())) * (this.missed ? 1.6 : 1);
+    z.speed = runner ? TUNE.runnerSpeed : 1.25;
+    z.coinValue = 0; z.coinPackValue = 0;
+    if (!z.bountyMarker) {
+      z.bountyMarker = new THREE.Mesh(new THREE.OctahedronGeometry(0.16), new THREE.MeshBasicMaterial({ color: 0xe6ab32 }));
+      z.bountyMarker.position.y = 1.9;
+      z.bountyMarker.userData.noBulletCollision = true;
+      z.root.add(z.bountyMarker);
+    }
+    z.bountyMarker.visible = false;
     z.lean = runner ? 0.45 : 0.18;
     z.vel.set(0, 0, 0);
     z.biteT = 0;
@@ -239,7 +263,9 @@ export class Round {
     hitZ.deadT = 0;
     hitZ.vel.addScaledVector(push, 2.5);
     this.kills++;
-    if (hitZ.demon) this.encounter.defeated(this);
+    this.awardCoins('kills', hitZ.coinValue ?? 0);
+    if (hitZ.coinPackValue > 0) this.coinDrops.drop(hitZ.root.position, hitZ.coinPackValue);
+    if (hitZ.demon) { this.encounter.cancelShots(); this.encounter.health.visible = false; }
     else if (Math.random() < 0.2) this.buffs.drop(hitZ.root.position);
     this.fx.spray(end, dir, 12, 'blood', 3.2);
     this.fx.spray(end, dir, 5, 'flesh', 2.6);
@@ -252,6 +278,7 @@ export class Round {
 
   // ---- per frame -------------------------------------------------------------
   update(dt, input, camera) {
+    if (this.state === 'paused') return;
     const h = this.hero, hp = h.root.position;
     const playing = this.state === 'play';
     let walk = 0;
@@ -261,8 +288,7 @@ export class Round {
       this.elapsed += dt;
       this.noticeT = Math.max(0, this.noticeT - dt);
       this.noise = Math.max(0, this.noise - dt * 0.06);
-      this.pressure = Math.min(100, this.elapsed / TUNE.length * 75 + this.noise + (this.missed ? 100 : 0));
-      this.time = Math.max(0, TUNE.length - this.elapsed);
+      this.time = this.elapsed;
       this.yaw += input.turn;
       this.pitch = THREE.MathUtils.clamp(this.pitch + (input.pitch ?? 0), -1.05, 1.05);
 
@@ -304,7 +330,7 @@ export class Round {
       }
       this.invuln -= dt;
       this.spawnTick(dt);
-      this.extraction.update(this, dt, input);
+      this.coinDrops.update(dt, this);
     }
     h.root.rotation.y = this.yaw;
     if (this.state === 'dead') {
@@ -318,6 +344,10 @@ export class Round {
     if (dt > 0) this.encounter.update(dt, this, camera);
     this.ballistics.update(dt);
     this.maxAlive = Math.max(this.maxAlive, this.alive);
+    if (this.state === 'play' && this.director.readyToComplete && this.alive === 0) {
+      this.coinDrops.collectAll(this);
+      this.finish(true);
+    }
   }
 
   updateZombies(dt, playing) {
@@ -426,21 +456,29 @@ export class Round {
 
   finish(win) {
     if (this.state !== 'play') return;
-    this.state = win ? 'win' : 'dead';
-    this.encounter.cancelShots();
-    this.director.clear();
-    this.ballistics.clear();
+    if (win && (!this.director.readyToComplete || this.alive > 0)) return;
     if (win) {
+      this.coinDrops.collectAll(this);
+      if (!this.trial) {
+        const reward = this.profile
+          ? this.mode === 'challenge' ? { ok: true, credited: this.profile.earn(this.dayConfig.completeBonus) } : this.profile.completeDay(this.day, this.dayConfig.completeBonus)
+          : { ok: true, credited: this.dayConfig.completeBonus };
+        this.income.completion = reward.credited ?? 0;
+        this.loot += this.income.completion;
+        this.bank = this.profile ? this.profile.coins : this.bank + this.income.completion;
+      }
       this.sfx.win();
     }
-    const carried = this.trial ? 0 : win ? this.loot : Math.floor(this.loot * 0.25);
-    if (this.profile) {
-      if (!this.trial) this.profile.earn(carried);
-      this.bank = this.profile.coins;
-    } else this.bank += carried;
-    this.hooks.end?.(win, { kills: this.kills, shots: this.shots, hits: this.hits, time: this.elapsed, hp: this.hp,
-      loot: this.loot, carried, bank: this.bank, opened: this.opened, weapon: this.weapon.id, trial: this.trial,
-      reason: win ? 'evacuated' : this.missed ? 'missed' : 'dead' });
+    this.state = win ? 'win' : 'dead';
+    this.encounter.cancelShots();
+    this.coinDrops.clear();
+    this.ballistics.clear();
+    // Kill and pickup rewards were already saved. Never credit the displayed total again.
+    const carried = Object.values(this.income).reduce((sum, amount) => sum + amount, 0);
+    this.bank = this.profile?.coins ?? this.bank;
+    this.hooks.end?.(win, { day: this.day, mode: this.mode, kills: this.kills, shots: this.shots, hits: this.hits, time: this.elapsed, hp: this.hp,
+      income: { ...this.income }, loot: carried, carried, bank: this.bank, weapon: this.weapon.id, trial: this.trial,
+      completed: this.profile?.campaignComplete ?? false, reason: win ? 'cleared' : 'dead' });
   }
 }
 
