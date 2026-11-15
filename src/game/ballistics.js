@@ -70,8 +70,17 @@ export class Ballistics {
 
   fire(origin, dir, weapon, shot) {
     if (this.active.length >= 256) return;
-    this.active.push({ position: origin.clone(), dir: dir.clone(), remaining: weapon.range,
-      travelled: 0, weapon, shot, ignored: new Set() });
+    // Capture upgrades and buffs at trigger time, shared by every pellet.
+    if (!shot.weapon) {
+      Object.defineProperties(shot, {
+        weapon: { value: Object.freeze({ ...weapon }) },
+        controlled: { value: new Set() },
+        pierce: { value: !!shot.pierce, writable: false },
+        blast: { value: !!shot.blast, writable: false },
+      });
+    }
+    this.active.push({ position: origin.clone(), dir: dir.clone(), remaining: shot.weapon.range,
+      travelled: 0, weapon: shot.weapon, shot, ignored: new Set() });
   }
 
   update(dt) {
@@ -108,7 +117,10 @@ export class Ballistics {
     this.active = survivors;
     for (const { p, z, point, distance } of impacts) {
       if (!p.shot.hit) { p.shot.hit = true; this.round.hits++; }
-      this.round.damage(z, p.dir, p.weapon.id === 'shotgun' && distance > 6 ? 0.4 : 1, p.weapon.knockback);
+      const control = !p.shot.controlled.has(z);
+      p.shot.controlled.add(z);
+      this.round.damage(z, p.dir, p.weapon.id === 'shotgun' && distance > 6 ? 0.4 : 1,
+        p.weapon.knockback, { weaponId: p.weapon.id, control });
       if (p.shot.blast && !p.shot.exploded) {
         p.shot.exploded = true;
         this.round.fx.spray(point, new THREE.Vector3(0, 1, 0), 18, 'ink', 4);
@@ -116,7 +128,9 @@ export class Ballistics {
         for (const other of this.round.pool) {
           if (!this.round.targetable(other) || this.round.chest(other, new THREE.Vector3()).distanceToSquared(point) > 2.2 ** 2) continue;
           const push = other.root.position.clone().sub(point).setY(0).normalize();
-          this.round.damage(other, push, 1);
+          const control = !p.shot.controlled.has(other);
+          p.shot.controlled.add(other);
+          this.round.damage(other, push, 1, 1, { weaponId: p.weapon.id, control });
         }
       }
     }
