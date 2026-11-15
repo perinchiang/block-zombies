@@ -11,7 +11,7 @@ try {
     const idle = { move: { x: 0, y: 0 }, turn: 0, firing: false };
     const checks = [];
     const check = (label, pass) => checks.push({ label, pass: !!pass });
-    const reset = () => { R.reset(); R.start(); R.spawnT = 999; R.pool.forEach(z => R.retire(z)); };
+    const reset = () => { R.reset(); R.start(); R.spawnTick = () => {}; R.pool.forEach(z => R.retire(z)); };
     reset();
     check('owned rifle starts a normal earning round', R.weapon.id === 'rifle' && !R.trial && profile.owns('rifle'));
     check('round wallet starts linked to profile', R.bank === profile.coins);
@@ -39,11 +39,11 @@ try {
     check('collected crate opens lid and hides marker without search progress', c.lid.rotation.x === -1.1 && !c.marker.visible && c.progress === 0);
     R.heroKick.set(0, 0, 0);
     R.extraction.update(R, 2, idle); check('no repeated payout', R.loot === c.value && R.opened === 1);
-    R.elapsed = 89; R.hero.root.position.set(0, 0, -53); R.extraction.update(R, 6, idle);
+    R.elapsed = 89; R.hero.root.position.set(R.evac.x, 0, R.evac.z); R.extraction.update(R, 6, idle);
     check('no evacuation before signal', !R.evacOpen && R.state === 'play');
     R.elapsed = 90; R.extraction.update(R, 2, idle); check('signal opens evacuation', R.evacOpen && R.extracting === 2);
-    R.hero.root.position.z = -45; R.extraction.update(R, 2, idle); check('leaving circle pauses countdown', R.extracting === 2);
-    R.hero.root.position.z = -53; const bank = R.bank; R.extraction.update(R, 3, idle);
+    R.hero.root.position.z = R.evac.z + 5; R.extraction.update(R, 2, idle); check('leaving circle pauses countdown', R.extracting === 2);
+    R.hero.root.position.z = R.evac.z; const bank = R.bank; R.extraction.update(R, 3, idle);
     check('five seconds evacuates with all coins', R.state === 'win' && R.bank === bank + c.value && profile.coins === R.bank);
     R.finish(true); check('settlement cannot duplicate', R.bank === bank + c.value && profile.coins === R.bank);
     reset(); R.loot = 75; const b2 = R.bank; R.finish(false);

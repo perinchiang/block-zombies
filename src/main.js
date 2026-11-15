@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { COL } from './render/palette.js';
 import { LIGHT, TOON } from './render/toon.js';
 import { InkLine } from './render/inkline.js';
-import { buildArena } from './world/arena.js';
+import { buildArena, BOUNDS } from './world/arena.js';
 import { Round } from './game/round.js';
 import { Fx } from './game/fx.js';
 import { Input } from './game/input.js';
@@ -261,7 +261,8 @@ function updateCamera() {
   const offset = _r.clone().multiplyScalar(CAM_OFF.x).addScaledVector(_f, -CAM_OFF.z).setY(CAM_OFF.y - pivot.y);
   offset.applyAxisAngle(_r, round.pitch);
   const want = pivot.clone().add(offset);
-  want.x = THREE.MathUtils.clamp(want.x, -6.3, 6.3);
+  want.x = THREE.MathUtils.clamp(want.x, -BOUNDS.x + 0.2, BOUNDS.x - 0.2);
+  want.z = THREE.MathUtils.clamp(want.z, BOUNDS.zMin + 0.2, BOUNDS.zMax - 0.2);
   want.y = Math.max(0.25, want.y);
   round.scene.updateMatrixWorld(true);
   const arm = want.clone().sub(pivot);

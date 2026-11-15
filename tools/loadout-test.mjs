@@ -46,8 +46,8 @@ try {
   // Freeze an active telegraphed attack via the real pause control.
   await page.evaluate(() => {
     const R = window.__game.round;
-    R.pool.forEach(z => { if (!z.demon) R.retire(z); }); R.spawnT = 999;
-    R.hero.root.position.set(-2, 0, -38); R.encounter.actor.attackT = 0;
+    R.pool.forEach(z => { if (!z.demon) R.retire(z); }); R.spawnTick = () => {};
+    R.hero.root.position.set(16, 0, -12); R.encounter.actor.attackT = 0;
   });
   await page.waitForFunction(() => window.__game.round.encounter.projectiles.some(p => p.active));
   await page.getByRole('button', { name: '暂停', exact: true }).tap();

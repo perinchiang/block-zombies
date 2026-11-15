@@ -54,7 +54,7 @@ html, body {
   border: 2px solid var(--ink); cursor: pointer; pointer-events: auto; touch-action: manipulation;
 }
 .pause:active { transform: translateY(2px); }
-.pause:focus-visible, .btn:focus-visible, .weapon-choice:focus-visible, .shop-buy:focus-visible, .shop-trial:focus-visible { outline: 3px solid var(--hero); outline-offset: 3px; }
+.pause:focus-visible, .btn:focus-visible, .weapon-choice:focus-visible, .shop-buy:focus-visible, .shop-trial:focus-visible, .shop-upgrade:focus-visible { outline: 3px solid var(--hero); outline-offset: 3px; }
 /* threat arrows: red ink wedges on the screen edge, pointing toward the zombie */
 .threats { position: absolute; inset: 0; }
 .threat { position: absolute; left: 0; top: 0; width: 0; height: 0; transition: opacity 0.15s; }
@@ -104,6 +104,10 @@ html, body {
 .shop-actions { display: flex; gap: 6px; margin-top: 8px; }
 .weapon-product button { min-height: 44px; padding: 5px 8px; border: 2px solid var(--ink); font: 900 13px var(--font); cursor: pointer; touch-action: manipulation; }
 .weapon-product .weapon-choice { display: block; width: 100%; margin-top: 8px; }
+.weapon-level { font-size: 14px; }
+.weapon-product .shop-upgrade { display: block; width: 100%; margin-top: 6px; background: var(--hero); color: var(--ink); }
+.card .weapon-next { min-height: 34px; }
+.shop-upgrade:disabled { cursor: default; opacity: 0.6; }
 .shop-buy { flex: 1; background: var(--hero); color: var(--ink); }
 .shop-buy:disabled { cursor: default; background: transparent; opacity: 0.6; }
 .shop-trial { background: var(--paper); color: var(--blood); }

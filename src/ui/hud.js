@@ -1,5 +1,5 @@
 import { TUNE } from '../game/round.js';
-import { WEAPONS } from '../game/weapons.js';
+import { WEAPONS, buildWeapon, UPGRADE_COSTS } from '../game/weapons.js';
 import { SHOP_PRICES } from '../game/profile.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -114,10 +114,18 @@ export class Hud {
   weaponChoices() {
     return `<div class="weapon-choices" role="group" aria-label="武器商店">${Object.values(WEAPONS).map((weapon) => {
       const owned = this.profile.owns(weapon.id);
+      const level = owned ? this.profile.weaponLevel(weapon.id) : 1;
+      const current = buildWeapon(weapon.id, level);
+      const next = level < 4 ? buildWeapon(weapon.id, level + 1) : null;
+      const upgradePrice = UPGRADE_COSTS[level];
+      const stats = config => `伤害 ×${config.damageMultiplier} · 弹匣 ${config.mag} · 换弹 ${Number(config.reload.toFixed(4))}秒`;
       const price = SHOP_PRICES[weapon.id];
       const remaining = Math.max(0, price - this.profile.coins);
       return `<article class="weapon-product">
-        <h2>${weapon.name}</h2><p>${weapon.description}</p>
+        <h2>${weapon.name} <span class="weapon-level">Lv.${level}</span></h2><p>${weapon.description}</p>
+        <p class="weapon-stats">${stats(current)}</p>
+        ${owned ? next ? `<p class="weapon-next">Lv.${level + 1}：${stats(next)}</p>
+          <button class="shop-upgrade" type="button" data-weapon="${weapon.id}" data-level="${level}" ${this.profile.coins < upgradePrice ? 'disabled' : ''}>升级 Lv.${level + 1} · ${upgradePrice} 金币${this.profile.coins < upgradePrice ? `（还差 ${upgradePrice - this.profile.coins}）` : ''}</button>` : '<p class="weapon-next">已满级 · 永久保留</p>' : ''}
         <p class="weapon-price">${price === 0 ? '免费 · 已拥有' : owned ? '已拥有' : `${price} 金币`}</p>
         ${owned ? `<button class="weapon-choice" type="button" data-weapon="${weapon.id}" aria-pressed="${this.selectedWeapon === weapon.id}">${this.selectedWeapon === weapon.id ? '已选择' : '选择装备'}</button>` : `<div class="shop-actions">
           <button class="shop-buy" type="button" data-weapon="${weapon.id}" ${remaining ? 'disabled' : ''}>${remaining ? `还差 ${remaining} 金币` : `购买 · ${price} 金币`}</button>
@@ -132,6 +140,7 @@ export class Hud {
   }
 
   title(onGo) {
+    this.profile.refresh();
     this.selectedWeapon = this.profile.owns(this.profile.equipped) ? this.profile.equipped : 'rifle';
     let started = false;
     const start = (id, trial) => {
@@ -148,12 +157,12 @@ export class Hud {
         <span class="touch-hint">左侧移动 · 右侧上下左右瞄准 · 按住开火也能拖动瞄准</span><span class="desktop-hint">WASD 移动 · 鼠标上下左右瞄准 · 左键开火</span><br>
         对准屏幕中心开火，无自动瞄准；远处移动目标需提前量<br>
         靠近自动开箱、收金币，移动开火也能拾取；红箱先击败恶魔<br>
-        撤离车 90 秒到站，4 分钟离开；圈内坚持 5 秒<br>
+        撤离车 90 秒到中央广场，4 分钟离开；车门旁累计登车 5 秒<br>
         撤离带走全部金币，失败保留 25%
       </div>`}
       ${this.weaponChoices()}
-      ${this.profile.owns('shotgun') ? '' : '<p class="trial-note">免费试用：整局收益为 0，撤离也不获得金币。</p>'}
-      ${this.profile.persistent ? '<p class="save-note">金币和已购武器自动保存在当前浏览器</p>' : this.storageWarning()}
+      ${this.profile.owns('shotgun') ? '' : '<p class="trial-note">免费试用固定 Lv.1，不能升级：整局收益为 0，撤离也不获得金币。</p>'}
+      ${this.profile.persistent ? '<p class="save-note">金币、已购武器和永久等级自动保存在当前浏览器</p>' : this.storageWarning()}
       <button class="btn" type="button">进入街道</button>`, () => start(this.selectedWeapon, false));
     $('.card', this.panel).classList.add('shop-card');
     this.panel.querySelectorAll('.weapon-choice').forEach((button) => button.addEventListener('click', () => this.title(onGo)));
@@ -168,6 +177,15 @@ export class Hud {
       }
       this.title(onGo);
     }));
+    this.panel.querySelectorAll('.shop-upgrade').forEach((button) => button.addEventListener('click', () => {
+      if (started || this.panel.hidden || button.disabled || !button.isConnected) return;
+      button.disabled = true;
+      const id = button.dataset.weapon;
+      this.profile.refresh();
+      // A stale card must not buy a different tier after another tab upgrades.
+      if (this.profile.weaponLevel(id) === Number(button.dataset.level)) this.profile.upgrade(id);
+      this.title(onGo);
+    }));
     this.panel.querySelectorAll('.shop-trial').forEach((button) => button.addEventListener('click', () => start(button.dataset.weapon, true)));
   }
 
@@ -176,7 +194,7 @@ export class Hud {
     const active = Object.entries(names).filter(([key]) => round.buffTimers[key] > 0);
     this.card(`
       <h1>暂停</h1>
-      <p>本局物资 · ${round.weapon?.name ?? WEAPONS.rifle.name}${round.trial ? ' · 试用局（收益为 0）' : ''}</p>
+      <p>本局物资 · ${round.weapon?.name ?? WEAPONS.rifle.name} · Lv.${round.weapon?.level ?? 1}${round.trial ? ' · 试用局（收益为 0）' : ''}</p>
       <div class="stats"><div><b>${round.loot}</b>携带金币</div><div><b>${round.opened} / ${round.crates.length}</b>已开物资箱</div></div>
       ${active.length ? `<p class="pause-buffs">${active.map(([key, name]) => `${name} · ${Math.ceil(round.buffTimers[key])} 秒`).join('　')}</p>` : ''}
       <p class="lock-hint" hidden aria-live="polite"></p>

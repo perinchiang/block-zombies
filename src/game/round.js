@@ -1,13 +1,14 @@
 import * as THREE from 'three';
 import { BlockMan } from '../actor/blockman.js';
-import { BOUNDS } from '../world/arena.js';
+import { resolvePosition, nextWaypoint } from '../world/navigation.js';
+import { SpawnDirector } from './spawn-director.js';
 import { Extraction, EXTRACTION } from './extraction.js';
 import { Buffs } from './buffs.js';
-import { WEAPONS } from './weapons.js';
+import { WEAPONS, buildWeapon } from './weapons.js';
 import { DemonEncounter } from './demon-encounter.js';
 import { Ballistics } from './ballistics.js';
 
-// Fixed-street extraction playtest. Combat tuning stays here.
+// Central-square extraction playtest. Combat tuning stays here.
 export const TUNE = {
   length: EXTRACTION.deadline,
   hearts: 5,
@@ -25,16 +26,7 @@ export const TUNE = {
   biteWindup: 0.38,
   biteCooldown: 1.0,
   invuln: 0.85,
-  maxAlive: 24,
-  // spawn interval eases from start to end across the round
-  spawnStart: 1.3,
-  spawnEnd: 0.4,
-  spawnNear: 14,         // ahead spawns appear this far .. +spawnSpread away
-  spawnSpread: 7,
-  runnerFrom: 20,        // seconds elapsed before runners appear
-  runnerChance: 0.3,
-  behindFrom: 14,        // seconds elapsed before some come from behind
-  behindChance: 0.3
+  maxAlive: 24
 };
 
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3();
@@ -42,7 +34,8 @@ const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3
 export class Round {
   constructor({ scene, colliders, scenery = [], fx, sfx, hooks, profile = null }) {
     this.scene = scene;
-    this.colliders = colliders;
+    this.staticColliders = colliders;
+    this.colliders = [...colliders];
     this.fx = fx;
     this.sfx = sfx;
     this.hooks = hooks;
@@ -60,6 +53,7 @@ export class Round {
     this.pool.push(this.encounter.actor);
     this.weapon = WEAPONS.rifle;
     this.extraction = new Extraction(scene);
+    this.director = new SpawnDirector(scene);
     this.crates = this.extraction.crates;
     this.evac = this.extraction.evac;
     this.profile = profile;
@@ -75,12 +69,13 @@ export class Round {
   reset(weaponId = this.weapon.id, { trial = false } = {}) {
     this.trial = trial;
     if (this.profile) this.bank = this.profile.coins;
-    this.weapon = WEAPONS[weaponId] ?? WEAPONS.rifle;
+    this.weapon = buildWeapon(Object.hasOwn(WEAPONS, weaponId) ? weaponId : 'rifle', trial ? 1 : Math.max(1, this.profile?.weaponLevel(weaponId) ?? 1));
     const h = this.hero;
     h.setWeapon(this.weapon.id);
-    h.root.position.set(0, 0, -14); // mid-street: room ahead and behind
+    h.setWeaponLevel(this.weapon.level);
+    h.root.position.set(0, 0, 5);
     h.root.rotation.set(0, 0, 0);
-    this.yaw = Math.PI;              // facing -Z, down the street
+    this.yaw = Math.PI;              // facing the central plaza
     this.pitch = -0.18;
     h.aimPitch = this.pitch;
     h.recoil = 0;
@@ -100,6 +95,8 @@ export class Round {
     this.notice = '靠近带十字标记的物资箱，自动拾取物资';
     this.noticeT = 7;
     this.extraction.reset();
+    this.vehiclePresent = false; this.colliders = this.staticColliders;
+    this.director.reset();
     this.buffs.reset();
     this.shots = 0;
     this.hits = 0;
@@ -107,7 +104,6 @@ export class Round {
     this.reloadT = 0;
     this.cool = 0;
     this.invuln = 0;
-    this.spawnT = 0.6;
     this.groanT = 1.5;
     this.maxAlive = 0;
     this.heroFall = 0;
@@ -116,8 +112,8 @@ export class Round {
     for (const z of this.pool) this.retire(z);
     this.encounter.reset();
     this.fx.clearDecals();
-    // a few already shambling down the street so the first second has a target
-    for (const [x, zz] of [[-1.2, -23], [1.6, -26], [0.2, -29]]) this.spawn(x, zz, false, false);
+    // One visible slow target leads toward the first supply crate.
+    this.spawn(0, -10, false, false);
     this.resolveAim();
   }
 
@@ -149,45 +145,18 @@ export class Round {
     z.lean = runner ? 0.45 : 0.18;
     z.vel.set(0, 0, 0);
     z.biteT = 0;
+    z.stunT = 0; z.stunCool = 0; z.hitReact = 0; z.navT = 0; z.waypoint = null;
     z.biteCool = 0.4;
     z.reach = 0;
     z.yaw = 0;
     return z;
   }
 
-  spawnTick(dt) {
-    this.spawnT -= dt;
-    if (this.spawnT > 0) return;
-    const k = this.pressure / 100;
-    this.spawnT = THREE.MathUtils.lerp(TUNE.spawnStart, TUNE.spawnEnd, k * k * (3 - 2 * k)) * (0.7 + Math.random() * 0.6) * (this.missed ? 0.45 : 1);
-    if (this.alive >= TUNE.maxAlive) return;
-    const h = this.hero.root.position;
-    const behind = this.elapsed > TUNE.behindFrom && Math.random() < TUNE.behindChance;
-    const runner = this.elapsed > TUNE.runnerFrom && Math.random() < (this.missed ? 0.85 : TUNE.runnerChance * (0.4 + k));
-    // 'ahead' and 'behind' are relative to where the hero is looking
-    const fz = Math.cos(this.yaw) >= 0 ? 1 : -1;
-    const dist = TUNE.spawnNear + Math.random() * TUNE.spawnSpread;
-    let zPos = h.z + (behind ? -fz * (dist - 3) : fz * dist);
-    zPos = THREE.MathUtils.clamp(zPos, BOUNDS.zMin + 2, BOUNDS.zMax - 0.5);
-    const x = (Math.random() * 2 - 1) * (BOUNDS.x - 0.8);
-    // never pop up on top of the hero
-    if (Math.hypot(x - h.x, zPos - h.z) < 6) return;
-    this.spawn(x, zPos, runner, true);
-    // groups later in the round
-    if (k > 0.45 && Math.random() < 0.4 && this.alive < TUNE.maxAlive) this.spawn(THREE.MathUtils.clamp(x + (Math.random() - 0.5) * 2, -BOUNDS.x + 0.5, BOUNDS.x - 0.5), zPos - 1, false, true);
-  }
+  spawnTick(dt) { this.director.update(dt, this); }
 
   // ---- movement --------------------------------------------------------------
-  /** Push a ground position out of solid props and the street walls. */
-  collide(p, r) {
-    for (const c of this.colliders) {
-      const dx = p.x - c.x, dz = p.z - c.z;
-      const d = Math.hypot(dx, dz), m = c.r + r;
-      if (d < m && d > 1e-5) { p.x = c.x + (dx / d) * m; p.z = c.z + (dz / d) * m; }
-    }
-    p.x = THREE.MathUtils.clamp(p.x, -BOUNDS.x + r, BOUNDS.x - r);
-    p.z = THREE.MathUtils.clamp(p.z, BOUNDS.zMin + r, BOUNDS.zMax - r);
-  }
+  /** Shared map collision for movement, recoil and pathfinding. */
+  collide(p, r) { resolvePosition(p, r, this.colliders); }
 
   forward(out = _a) { return out.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)); }
   right(out = _b) { return out.set(-Math.cos(this.yaw), 0, Math.sin(this.yaw)); }
@@ -242,16 +211,26 @@ export class Round {
     this.hooks.shake(weapon.id === 'shotgun' ? 0.14 : 0.05);
   }
 
-  damage(hitZ, dir, amount, knockback = 1) {
+  damage(hitZ, dir, amount, knockback = 1, { weaponId = this.weapon.id, control = true } = {}) {
     if (!this.targetable(hitZ)) return;
     const h = this.hero;
     const end = this.chest(hitZ, new THREE.Vector3());
     hitZ.hp -= amount;
     hitZ.flash();
-    if (hitZ.demon) this.encounter.takeHit();
-    const push = dir.clone().setY(0);
-    hitZ.vel.addScaledVector(push, (hitZ.demon ? 0.3 : hitZ.runner ? 2.2 : 1.6) * knockback);
-    if (this.weapon.id === 'shotgun' && !hitZ.demon) { hitZ.biteT = 0; hitZ.biteCool = Math.max(hitZ.biteCool, 0.5); }
+    if (hitZ.demon) this.encounter.takeHit(this, control);
+    const push = dir.clone().setY(0).normalize();
+    hitZ.hitReact = 0.18;
+    if (control && !hitZ.demon) {
+      const heavy = weaponId === 'shotgun';
+      hitZ.vel.addScaledVector(push, heavy ? 5 : 2.8);
+      hitZ.vel.clampLength(0, heavy ? 5 : 3.5);
+      if (hitZ.stunCool <= 0) {
+        hitZ.stunT = heavy ? 0.28 : 0.12;
+        hitZ.stunCool = hitZ.runner ? 0.42 : heavy ? 0.38 : 0.17;
+        hitZ.biteT = 0; hitZ.reach = 0;
+        hitZ.biteCool = Math.max(hitZ.biteCool, hitZ.stunT + 0.1);
+      }
+    }
     this.fx.spray(end, dir, 5, Math.random() < 0.5 ? 'blood' : 'flesh', 2.4);
     const pan = THREE.MathUtils.clamp((end.x - h.root.position.x) * 0.1, -0.8, 0.8);
     if (hitZ.hp > 0) { this.sfx.hit(pan); return; }
@@ -365,13 +344,21 @@ export class Round {
       }
       const dx = hp.x - p.x, dz = hp.z - p.z, d = Math.hypot(dx, dz) || 1;
       // steer at the hero; runners lead a little
-      const want = Math.atan2(dx, dz);
+      z.stunT = Math.max(0, z.stunT - dt); z.stunCool = Math.max(0, z.stunCool - dt);
+      if (z.rise >= 1) this.collide(p, 0.38);
+      z.navT -= dt;
+      if (z.navT <= 0 || !z.waypoint) {
+        z.waypoint = nextWaypoint(p, hp, this.colliders, 0.38);
+        z.navT = 0.3;
+      }
+      const target = z.waypoint ?? p;
+      const want = Math.atan2(target.x - p.x, target.z - p.z);
       let dy = want - z.yaw;
       dy = Math.atan2(Math.sin(dy), Math.cos(dy));
       z.yaw += dy * Math.min(1, dt * (z.runner ? 8 : 4));
       z.root.rotation.y = z.yaw;
       let walk = 1;
-      if (playing && d > TUNE.biteRange * 0.9 && z.rise >= 1) {
+      if (playing && z.stunT <= 0 && d > TUNE.biteRange * 0.9 && z.rise >= 1 && Math.hypot(target.x - p.x, target.z - p.z) > 0.12) {
         p.x += Math.sin(z.yaw) * z.speed * dt;
         p.z += Math.cos(z.yaw) * z.speed * dt;
       } else walk = z.rise >= 1 ? 0.2 : 0.6;
@@ -383,22 +370,23 @@ export class Round {
         const ox = p.x - o.root.position.x, oz = p.z - o.root.position.z, od = ox * ox + oz * oz;
         if (od < 0.5 && od > 1e-6) { const k = (0.71 - Math.sqrt(od)) * 0.5; const s = Math.sqrt(od); p.x += (ox / s) * k; p.z += (oz / s) * k; }
       }
-      if (z.rise >= 1) this.collide(p, 0.3);
+      if (z.rise >= 1) this.collide(p, 0.38);
 
       // bite: wind up, then land if still close
       z.biteCool -= dt;
-      if (playing && z.rise >= 1) {
+      const biteDx = hp.x - p.x, biteDz = hp.z - p.z, biteDistance = Math.hypot(biteDx, biteDz) || 1;
+      if (playing && z.rise >= 1 && z.stunT <= 0) {
         if (z.biteT > 0) {
           z.biteT += dt;
           z.reach = Math.min(1, z.biteT / TUNE.biteWindup);
           if (z.biteT >= TUNE.biteWindup) {
             z.biteT = 0;
             z.biteCool = TUNE.biteCooldown;
-            if (d < TUNE.biteRange + 0.25) this.bite(z, dx / d, dz / d);
+            if (biteDistance < TUNE.biteRange + 0.25) this.bite(z, biteDx / biteDistance, biteDz / biteDistance);
           }
         } else {
           z.reach = Math.max(0, z.reach - dt * 3);
-          if (d < TUNE.biteRange && z.biteCool <= 0) z.biteT = 1e-4;
+          if (biteDistance < TUNE.biteRange && z.biteCool <= 0) z.biteT = 1e-4;
         }
       }
       if (d < 12 && Math.random() < dt * 0.4) groanFrom = z;
@@ -440,6 +428,7 @@ export class Round {
     if (this.state !== 'play') return;
     this.state = win ? 'win' : 'dead';
     this.encounter.cancelShots();
+    this.director.clear();
     this.ballistics.clear();
     if (win) {
       this.sfx.win();

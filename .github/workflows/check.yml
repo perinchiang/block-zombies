@@ -15,5 +15,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node tools/profile-test.mjs
+      - run: node tools/navigation-test.mjs
       - run: npm run build
       - run: git diff --check

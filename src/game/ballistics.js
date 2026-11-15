@@ -119,7 +119,7 @@ export class Ballistics {
       if (!p.shot.hit) { p.shot.hit = true; this.round.hits++; }
       const control = !p.shot.controlled.has(z);
       p.shot.controlled.add(z);
-      this.round.damage(z, p.dir, p.weapon.id === 'shotgun' && distance > 6 ? 0.4 : 1,
+      this.round.damage(z, p.dir, (p.weapon.id === 'shotgun' && distance > 6 ? 0.4 : 1) * (p.weapon.damageMultiplier ?? 1),
         p.weapon.knockback, { weaponId: p.weapon.id, control });
       if (p.shot.blast && !p.shot.exploded) {
         p.shot.exploded = true;

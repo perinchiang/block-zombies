@@ -13,7 +13,8 @@ const state = page => page.evaluate(() => {
   const R = window.__game.round;
   return {
     state: R.state, time: R.time, elapsed: R.elapsed, hp: R.hp, pressure: R.pressure,
-    shots: R.shots, ammo: R.ammo, reload: R.reloadT, spawn: R.spawnT,
+    shots: R.shots, ammo: R.ammo, reload: R.reloadT,
+    spawn: { timer: R.director.timer, graveTimer: R.director.graveTimer, gate: R.director.gate, pending: R.director.pending ? { ...R.director.pending } : null },
     position: R.hero.root.position.toArray(), yaw: R.yaw, extracting: R.extracting,
     buffs: { ...R.buffTimers }, loot: R.loot,
     crates: R.crates.map(c => c.opened),
@@ -75,7 +76,7 @@ try {
     await page.evaluate(kind => {
       window.__game.begin();
       const R = window.__game.round;
-      R.pool.forEach(z => R.retire(z)); R.spawnT = 999;
+      R.pool.forEach(z => R.retire(z)); R.spawnTick = () => {};
       if (kind === 'crate') {
         const c = R.crates[0]; R.hero.root.position.set(c.x, 0, c.z + 1);
         R.state = 'paused';
