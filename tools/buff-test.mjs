@@ -10,12 +10,12 @@ try {
     const checks = [], check = (label, pass) => checks.push({ label, pass: !!pass });
     const idle = { move: { x: 0, y: 0 }, turn: 0, firing: false };
     const reset = () => {
-      R.reset('rifle'); R.start(); R.spawnT = 999; R.pool.forEach(z => R.retire(z));
-      R.hero.root.position.set(0, 0, -30); R.yaw = Math.PI; R.pitch = 0;
+      R.reset('rifle'); R.start(); R.spawnTick = () => {}; R.pool.forEach(z => R.retire(z));
+      R.hero.root.position.set(0, 0, -7); R.yaw = Math.PI; R.pitch = 0;
       R.hero.aimPitch = 0; R.hero.recoil = 0;
       R.hero.root.rotation.y = R.yaw; R.hero.pose(0); R.scene.updateMatrixWorld(true);
       camera.position.copy(R.hero.muzzle.getWorldPosition(R.hero.root.position.clone()));
-      camera.lookAt(0, 0.95, -40); camera.updateMatrixWorld(true);
+      camera.lookAt(0, 0.95, -17); camera.updateMatrixWorld(true);
     };
     const fireAt = target => {
       R.scene.updateMatrixWorld(true);
@@ -40,8 +40,8 @@ try {
     reset();
     // Extend the muzzle-to-chest ray through the second chest, including height.
     // Equal ground X alone is not collinear with the offset rifle muzzle.
-    const a = R.spawn(camera.position.x, -34, false, false);
-    const b = R.spawn(camera.position.x, -37, false, false);
+    const a = R.spawn(camera.position.x, -11, false, false);
+    const b = R.spawn(camera.position.x, -14, false, false);
     const ray = R.chest(a, a.root.position.clone()).sub(camera.position);
     const rearChest = camera.position.clone().addScaledVector(ray, (b.root.position.z - camera.position.z) / ray.z);
     b.root.position.x = rearChest.x; b.root.position.y = rearChest.y - 0.95;
@@ -51,14 +51,14 @@ try {
     const positions = [a.root.position.clone(), b.root.position.clone()]; flight();
     check('pierce damages both lined-up zombies', a.hp === 2 && b.hp === 2);
     check('isolated bullet updates leave enemies stationary', a.root.position.equals(positions[0]) && b.root.position.equals(positions[1]));
-    reset(); const c = R.spawn(0, -34, false, false), d = R.spawn(1, -34, false, false);
+    reset(); const c = R.spawn(0, -11, false, false), d = R.spawn(1, -11, false, false);
     B.grant('blast'); fireAt(c); flight(); check('blast damages a nearby off-line zombie', c.hp === 1 && d.hp === 2);
-    reset(); const z = R.spawn(0, -31, false, false); B.grant('shield'); const hp = R.hp; R.bite(z, 0, 1);
+    reset(); const z = R.spawn(0, -8, false, false); B.grant('shield'); const hp = R.hp; R.bite(z, 0, 1);
     check('shield absorbs exactly one bite', R.hp === hp && !B.has('shield')); R.invuln = 0; R.bite(z, 0, 1); check('next bite hurts', R.hp === hp - 1);
-    reset(); R.update(0.1, { ...idle, move: { x: 0, y: 1 } }, camera); const normal = -30 - h.z;
+    reset(); R.update(0.1, { ...idle, move: { x: 0, y: 1 } }, camera); const normal = -7 - h.z;
     reset(); B.grant('sprint'); R.update(0.1, { ...idle, move: { x: 0, y: 1 } }, camera);
-    check('sprint increases speed by 40percent', Math.abs((-30 - h.z) / normal - 1.4) < 1e-8);
-    reset(); const walker = R.spawn(0, -30.8, false, false); B.grant('sprint'); R.update(0.01, idle, camera);
+    check('sprint increases speed by 40percent', Math.abs((-7 - h.z) / normal - 1.4) < 1e-8);
+    reset(); const walker = R.spawn(0, -7.8, false, false); B.grant('sprint'); R.update(0.01, idle, camera);
     check('sprint shoves ordinary zombies away', walker.vel.length() > 0 && walker.biteCool > 0);
     reset(); check('retry clears buffs and drops', Object.values(B.timers).every(t => t === 0) && B.drops.every(d => !d.mesh.visible));
     return checks;

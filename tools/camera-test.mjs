@@ -40,9 +40,9 @@ try {
       R.state = 'paused'; await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
       check('pause preserves framing', camera.position.equals(position) && camera.quaternion.equals(rotation));
       R.start();
-      for (const x of [-6.1, 6.1]) {
-        R.hero.root.position.set(x, 0, -30); await view(-0.18);
-        check(`camera clears the street wall at x=${x}`, Math.abs(camera.position.x) <= 6.3 && camera.position.y >= 0.25);
+      for (const [x, z] of [[-19.4, 0], [19.4, 0], [0, -19.4], [0, 19.4]]) {
+        R.hero.root.position.set(x, 0, z); await view(-0.18);
+        check(`camera stays within square walls at (${x}, ${z})`, Math.abs(camera.position.x) <= 19.8 && Math.abs(camera.position.z) <= 19.8 && camera.position.y >= 0.25);
       }
       return checks;
     });

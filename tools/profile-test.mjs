@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Profile, PROFILE_KEY, SHOP_PRICES } from '../src/game/profile.js';
+import { buildWeapon, WEAPONS, UPGRADE_COSTS } from '../src/game/weapons.js';
 
 class StorageFake {
   values = new Map();
@@ -18,6 +19,110 @@ class StorageFake {
   }
 }
 const snapshot = overrides => ({ version: 1, coins: 300, owned: ['rifle'], equipped: 'rifle', ...overrides });
+
+test('weapon configurations are immutable and apply each upgrade exactly once', () => {
+  assert.deepEqual(UPGRADE_COSTS, [0, 60, 120, 220]);
+  for (const id of ['rifle', 'shotgun']) {
+    for (let level = 1; level <= 4; level++) {
+      const weapon = buildWeapon(id, level);
+      assert.equal(weapon.level, level);
+      assert.equal(weapon.damageMultiplier, [1, 1.5, 1.75, 2][level - 1]);
+      assert.equal(weapon.mag, (id === 'rifle' ? [24, 27, 30, 33] : [6, 7, 8, 9])[level - 1]);
+      assert.equal(weapon.reload, WEAPONS[id].reload * [1, .95, .9, .85][level - 1]);
+      for (const key of ['range', 'fireRate', 'knockback', 'noise', 'movingSpeed']) assert.equal(weapon[key], WEAPONS[id][key]);
+      assert(Object.isFrozen(weapon));
+      assert(Object.isFrozen(weapon.pellets));
+      assert.throws(() => { weapon.mag = 999; }, TypeError);
+      assert.throws(() => weapon.pellets.push(1), TypeError);
+    }
+    assert.equal(buildWeapon(id).level, 1);
+    for (const level of [0, 5, 1.5, '2', NaN, null]) assert.throws(() => buildWeapon(id, level), RangeError);
+  }
+  assert.throws(() => buildWeapon('__proto__'), RangeError);
+});
+
+test('v1 migration preserves wallet, ownership and equipment and persists base levels', () => {
+  const storage = new StorageFake();
+  storage.setItem(PROFILE_KEY, JSON.stringify(snapshot({ coins: 1040, owned: ['rifle', 'shotgun'], equipped: 'shotgun' })));
+  const profile = new Profile(storage);
+  assert.equal(profile.coins, 1040);
+  assert.equal(profile.equipped, 'shotgun');
+  assert.equal(profile.weaponLevel('rifle'), 1);
+  assert.equal(profile.weaponLevel('shotgun'), 1);
+  assert.equal(JSON.parse(storage.getItem(PROFILE_KEY)).version, 2);
+  assert.deepEqual(JSON.parse(storage.getItem(PROFILE_KEY)).levels, { rifle: 1, shotgun: 1 });
+});
+
+test('upgrades debit each tier, preserve equipment and cap both weapons at Lv4', () => {
+  const storage = new StorageFake(), profile = new Profile(storage);
+  assert.equal(profile.weaponLevel('shotgun'), 0);
+  assert.equal(profile.weaponLevel('__proto__'), 0);
+  assert.deepEqual(profile.upgrade('shotgun'), { ok: false, reason: 'unowned' });
+  assert.deepEqual(profile.upgrade('__proto__'), { ok: false, reason: 'weapon' });
+  assert.deepEqual(profile.upgrade('rifle'), { ok: false, reason: 'funds' });
+  profile.earn(1040);
+  profile.buy('shotgun');
+  for (const id of ['rifle', 'shotgun']) {
+    for (let level = 1; level < 4; level++) {
+      const before = profile.coins, writes = storage.writes;
+      assert.deepEqual(profile.upgrade(id), { ok: true });
+      assert.equal(profile.coins, before - UPGRADE_COSTS[level]);
+      assert.equal(storage.writes, writes + 1);
+      assert.equal(new Profile(storage).weaponLevel(id), level + 1);
+    }
+    assert.deepEqual(profile.upgrade(id), { ok: false, reason: 'max' });
+  }
+  assert.equal(profile.coins, 0);
+  assert.equal(profile.equipped, 'rifle');
+});
+
+test('upgrade refreshes stale wallets and failed writes retain the whole session snapshot', () => {
+  const storage = new StorageFake(), first = new Profile(storage);
+  first.earn(180);
+  const stale = new Profile(storage);
+  first.upgrade('rifle');
+  assert.deepEqual(stale.upgrade('rifle'), { ok: true });
+  assert.equal(stale.coins, 0);
+  assert.equal(stale.weaponLevel('rifle'), 3);
+  first.earn(220);
+  storage.denyWrite = true;
+  first.upgrade('rifle');
+  assert.equal(first.weaponLevel('rifle'), 4);
+  assert.equal(first.coins, 0);
+  assert.equal(first.persistent, false);
+  assert.equal(first.refresh(), false);
+  assert.equal(first.weaponLevel('rifle'), 4);
+  storage.denyWrite = false;
+  first.earn(1);
+  assert.equal(new Profile(storage).weaponLevel('rifle'), 4);
+  assert.equal(new Profile(storage).coins, 1);
+});
+
+test('unknown versions are never overwritten, including during unsaved session recovery', () => {
+  for (const dirty of [false, true]) {
+    const storage = new StorageFake(), profile = new Profile(storage);
+    if (dirty) { storage.denyWrite = true; profile.earn(10); storage.denyWrite = false; }
+    const raw = JSON.stringify(snapshot({ version: 99, coins: 12345 }));
+    storage.setItem(PROFILE_KEY, raw);
+    profile.refresh();
+    profile.earn(300);
+    profile.buy('shotgun');
+    profile.upgrade('shotgun');
+    assert.equal(storage.getItem(PROFILE_KEY), raw);
+    assert.equal(profile.persistent, false);
+  }
+});
+
+test('invalid v2 levels cannot partially replace a valid snapshot', () => {
+  const storage = new StorageFake(), profile = new Profile(storage);
+  profile.earn(180); profile.upgrade('rifle');
+  for (const levels of [null, [], {}, { rifle: 0 }, { rifle: 5 }, { rifle: 1.5 }, { rifle: '2' }, { rifle: 2, shotgun: 1 }]) {
+    storage.setItem(PROFILE_KEY, JSON.stringify(snapshot({ version: 2, levels })));
+    assert.equal(profile.refresh(), false);
+    assert.equal(profile.coins, 120);
+    assert.equal(profile.weaponLevel('rifle'), 2);
+  }
+});
 
 test('cold start exposes the free rifle and versioned storage key', () => {
   const storage = new StorageFake();
@@ -48,7 +153,7 @@ test('funds, purchases, ownership, equipment and atomic snapshot reload', () => 
   assert.equal(profile.equip('shotgun'), true);
   assert.equal(storage.writes, 3);
   assert.equal(storage.values.size, 1);
-  assert.deepEqual(JSON.parse(storage.getItem(PROFILE_KEY)), snapshot({ coins: 60, owned: ['rifle', 'shotgun'], equipped: 'shotgun' }));
+  assert.deepEqual(JSON.parse(storage.getItem(PROFILE_KEY)), snapshot({ version: 2, coins: 60, owned: ['rifle', 'shotgun'], equipped: 'shotgun', levels: { rifle: 1, shotgun: 1 } }));
   const restored = new Profile(storage);
   assert.equal(restored.coins, 60);
   assert.equal(restored.owns('shotgun'), true);
@@ -64,7 +169,7 @@ test('corrupt, unknown, invalid version and inconsistent snapshots are rejected'
   const invalid = [
     '{', 'null', '[]', 'true', '{}',
     ...[
-      { version: 0 }, { version: 2 }, { version: '1' }, { version: undefined },
+      { version: 2 }, { version: undefined },
       { coins: -1 }, { coins: 0.5 }, { coins: '300' }, { coins: null },
       { coins: NaN }, { coins: Infinity }, { coins: Number.MAX_SAFE_INTEGER },
       { coins: 1_000_001 }, { coins: undefined },

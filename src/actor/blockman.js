@@ -49,6 +49,7 @@ export class BlockMan {
     this.kind = kind;
     this.t = Math.random() * 10;
     this.flashT = 0;
+    this.hitReact = 0; // seconds remaining; parent sets 0.18 on a controlled hit
     this.recoil = 0;
     const zombie = kind === 'zombie';
     const M = looks(kind, zombie ? variant % ZOMBIE_VARIANTS : 0);
@@ -105,6 +106,16 @@ export class BlockMan {
       const pump = part(box(0.19, 0.13, 0.25), wood, -0.03); pump.position.z = 0.27;
       const butt = part(box(0.14, 0.17, 0.26), wood, -0.05); butt.position.z = -0.34;
       this.shotgun.add(tube, pump, butt);
+      this.weaponBands = [];
+      for (const weapon of [this.rifle, this.shotgun]) {
+        for (let i = 0; i < 4; i++) {
+          const band = part(box(0.21, 0.21, 0.035), metal, 0.02);
+          band.position.z = -0.18 + i * 0.09;
+          band.visible = false;
+          weapon.add(band);
+          this.weaponBands.push({ mesh: band, level: i + 2 });
+        }
+      }
       this.shotgun.visible = false;
       this.gun.add(this.rifle, this.shotgun);
       this.gun.position.set(0, -0.44, 0.1);
@@ -131,6 +142,11 @@ export class BlockMan {
     this.muzzle.position.z = id === 'shotgun' ? 0.6 : 0.55;
   }
 
+  setWeaponLevel(level) {
+    this.weaponLevel = Math.max(1, Math.floor(Number(level) || 1));
+    for (const band of this.weaponBands ?? []) band.mesh.visible = this.weaponLevel >= band.level;
+  }
+
   /** Brief paper-white flash, the comic "hit" frame. */
   flash(t = 0.07) {
     this.flashT = t;
@@ -142,6 +158,9 @@ export class BlockMan {
     if (this.flashT > 0 && (this.flashT -= dt) <= 0) {
       for (const m of this.meshes) m.material = m.userData.mat;
     }
+    const hitLean = Math.min(1, Math.max(0, this.hitReact) / 0.18);
+    this.hitReact = Math.max(0, this.hitReact - dt);
+    this.body.rotation.x = -hitLean * 0.48;
     const t = this.t;
     if (this.kind === 'zombie') {
       const p = t * 4.2 * this.speed;

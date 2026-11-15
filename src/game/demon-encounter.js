@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import { Demon } from '../actor/demon.js';
 import { flat } from '../render/toon.js';
 import { COL } from '../render/palette.js';
+import { nextWaypoint } from '../world/navigation.js';
 
 export const DEMON = Object.freeze({
-  x: -4.7, z: -40, hp: 36, radius: 0.68,
+  x: 15, z: -15, hp: 36, radius: 0.68,
   notice: 6, forget: 26, leash: 3, speed: 0.8,
   windup: 0.8, flight: 0.85, cooldown: 2.8, blastRadius: 1.8,
 });
@@ -30,7 +31,7 @@ export class DemonEncounter {
     // A small world-space health strip, visible only after engaging the guard.
     this.health = new THREE.Group();
     this.health.add(new THREE.Mesh(new THREE.PlaneGeometry(1.25, 0.14), flat(COL.ink, { side: THREE.DoubleSide })));
-    this.healthFill = new THREE.Mesh(new THREE.PlaneGeometry(1.18, 0.08), red);
+    this.healthFill = new THREE.Mesh(new THREE.PlaneGeometry(1.18, 0.08), red.clone());
     this.healthFill.position.z = 0.01; this.health.add(this.healthFill);
     scene.add(this.health);
     this.reset();
@@ -39,7 +40,10 @@ export class DemonEncounter {
   reset() {
     const d = this.actor;
     Object.assign(d, { active: true, dead: false, deadT: 0, fall: 0, rise: 1, runner: false,
-      hp: DEMON.hp, alert: false, cast: 0, windupT: 0, attackT: 1.2, forgetT: 0, yaw: Math.PI / 2 });
+      hp: DEMON.hp, alert: false, cast: 0, windupT: 0, attackT: 1.2, forgetT: 0,
+      interruptResistT: 0, interruptCueT: 0, yaw: Math.PI / 2 });
+    this.health.scale.setScalar(1);
+    this.healthFill.material.color.set(COL.blood);
     d.flash(0);
     d.vel.set(0, 0, 0); d.root.position.set(DEMON.x, 0, DEMON.z);
     d.root.rotation.set(0, d.yaw, 0); d.root.visible = true;
@@ -51,7 +55,25 @@ export class DemonEncounter {
     this.actor.windupT = this.actor.cast = 0;
   }
 
-  takeHit() { this.actor.alert = true; this.actor.forgetT = 0; }
+  // Returns true only when this hit interrupts an unreleased cast.
+  takeHit(round, control = true) {
+    const d = this.actor;
+    d.alert = true; d.forgetT = 0;
+    d.flash();
+    if (!control || d.interruptResistT > 0 || !this.projectiles.some(p => p.active && p.age < DEMON.windup)) return false;
+    for (const p of this.projectiles) {
+      if (!p.active || p.age >= DEMON.windup) continue;
+      p.active = false; p.ball.visible = p.ring.visible = p.fill.visible = false;
+    }
+    d.windupT = d.cast = 0;
+    d.interruptResistT = 3;
+    d.interruptCueT = 0.45;
+    // A prompt retry inside the resistance window guarantees continued pressure.
+    d.attackT = Math.min(d.attackT, 0.6);
+    this.healthFill.material.color.set(0xffffff);
+    this.health.scale.setScalar(1.3);
+    return true;
+  }
 
   defeated(round) {
     this.cancelShots(); this.health.visible = false;
@@ -113,7 +135,11 @@ export class DemonEncounter {
       for (let i = 1; i <= steps && !hit; i++) {
         const pos = prev.clone().lerp(p.ball.position, i / steps);
         for (const c of round.colliders) {
-          if (c.r < 0.3 || pos.y > 1.5 || Math.hypot(pos.x - c.x, pos.z - c.z) > c.r + 0.15) continue;
+          if (pos.y > (c.height ?? 1.5) + 0.15) continue;
+          const blocked = c.r != null
+            ? c.r >= 0.3 && Math.hypot(pos.x - c.x, pos.z - c.z) <= c.r + 0.15
+            : Math.abs(pos.x - c.x) <= c.halfX + 0.15 && Math.abs(pos.z - c.z) <= c.halfZ + 0.15;
+          if (!blocked) continue;
           p.target.copy(pos).setY(0.18); hit = true; break;
         }
       }
@@ -139,6 +165,10 @@ export class DemonEncounter {
       if (dist < DEMON.notice) d.alert = true;
       d.forgetT = dist > DEMON.forget ? d.forgetT + dt : 0;
       if (d.forgetT > 2) d.alert = false;
+      d.interruptResistT = Math.max(0, d.interruptResistT - dt);
+      d.interruptCueT = Math.max(0, d.interruptCueT - dt);
+      this.healthFill.material.color.set(d.interruptCueT > 0 ? 0xffffff : COL.blood);
+      this.health.scale.setScalar(d.interruptCueT > 0 ? 1.3 : 1);
       d.attackT -= dt;
       d.windupT = Math.max(0, d.windupT - dt);
       d.cast = d.windupT > 0 ? 1 - d.windupT / DEMON.windup : Math.max(0, d.cast - dt * 5);
@@ -147,9 +177,10 @@ export class DemonEncounter {
       const homeOffset = desired.clone().sub(new THREE.Vector3(DEMON.x, 0, DEMON.z)).setY(0);
       if (homeOffset.length() > DEMON.leash) homeOffset.setLength(DEMON.leash);
       desired.set(DEMON.x + homeOffset.x, 0, DEMON.z + homeOffset.z);
-      const step = desired.sub(pos).setY(0);
-      const walk = step.length() > 0.2 && !d.windupT && (!d.alert || dist > 4.5);
-      if (walk) pos.addScaledVector(step.normalize(), DEMON.speed * dt);
+      const waypoint = nextWaypoint(pos, desired, round.colliders, DEMON.radius);
+      const step = new THREE.Vector3(waypoint.x - pos.x, 0, waypoint.z - pos.z);
+      const walk = desired.distanceTo(pos) > 0.2 && step.length() > 1e-6 && !d.windupT && (!d.alert || dist > 4.5);
+      if (walk) pos.addScaledVector(step.clone().normalize(), Math.min(step.length(), DEMON.speed * dt));
       pos.addScaledVector(d.vel, dt); d.vel.multiplyScalar(Math.max(0, 1 - dt * 7));
       round.collide(pos, DEMON.radius);
       if (d.alert) d.yaw = Math.atan2(h.x - pos.x, h.z - pos.z);
