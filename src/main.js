@@ -122,7 +122,9 @@ function openShop() {
   hud.title((weaponId, options) => begin(weaponId, options));
 }
 
-function begin(weaponId = hud.selectedWeapon, { trial = false } = {}) {
+function begin(weaponId = hud.selectedWeapon, { trial = false, mode = 'campaign' } = {}) {
+  profile.refresh();
+  if (!trial && mode !== 'challenge' && profile.campaignComplete) { openShop(); return; }
   // Trials are explicit, and never change the saved owned loadout.
   if (trial && weaponId !== 'shotgun') trial = false;
   if (!trial && !profile.owns(weaponId)) weaponId = profile.equipped;
@@ -130,7 +132,7 @@ function begin(weaponId = hud.selectedWeapon, { trial = false } = {}) {
   sfx.init();
   input.reset();
   hud.closePause();
-  round.reset(weaponId, { trial });
+  round.reset(weaponId, { trial, mode });
   round.start();
   syncInput();
   hud.pauseButton.hidden = false;

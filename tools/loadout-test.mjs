@@ -12,53 +12,46 @@ try {
     localStorage.setItem(key, JSON.stringify({ version: 1, coins: 0, owned: ['rifle', 'shotgun'], equipped: 'rifle' }));
     sessionStorage.setItem(marker, '1');
   }, PROFILE_KEY);
-  await page.goto('http://127.0.0.1:5191/'); await page.waitForFunction(() => window.__ready);
+  await page.goto(process.env.LOADOUT_TEST_URL || 'http://127.0.0.1:5191/'); await page.waitForFunction(() => window.__ready);
   await page.locator('.weapon-choice[data-weapon="shotgun"]').tap();
   assert.equal(await page.locator('.weapon-choice[data-weapon="shotgun"]').getAttribute('aria-pressed'), 'true');
   assert(await page.evaluate(() => window.__game.profile.owns('shotgun') && window.__game.profile.equipped === 'shotgun'));
-  await page.getByRole('button', { name: '进入街道' }).tap();
+  await page.getByRole('button', { name: '挑战 Day 1', exact: true }).tap();
   await page.waitForFunction(() => window.__game.round.weapon.id === 'shotgun' && window.__game.round.state === 'play');
   assert.equal(await page.evaluate(() => window.__game.round.trial), false, 'owned shotgun earns normal rewards');
   assert.equal(await page.locator('.ammo').innerText(), '6/6');
   assert(await page.evaluate(() => window.__game.round.hero.shotgun.visible && !window.__game.round.hero.rifle.visible));
   await page.getByRole('button', { name: '暂停', exact: true }).tap();
-  assert.match(await page.locator('#panel').innerText(), /本局物资 · 霰弹枪/);
+  assert.match(await page.locator('#panel').innerText(), /霰弹枪/);
+  assert.match(await page.locator('#panel').innerText(), /Day 1/);
   await page.getByRole('button', { name: '继续游戏' }).tap();
   await page.evaluate(() => window.__game.round.finish(false));
   await page.getByRole('button', { name: '返回商店' }).waitFor();
   const layout = await page.locator('.card').evaluate(el => ({ overflow: el.scrollHeight > el.clientHeight, bottom: el.querySelector('.btn').getBoundingClientRect().bottom }));
   assert(!layout.overflow && layout.bottom < 375, 'result and return-to-shop button fit phone landscape');
-  await page.screenshot({ path: '/tmp/bz/m2-result-667.png' });
   await page.getByRole('button', { name: '返回商店' }).tap();
-  await page.getByRole('button', { name: '进入街道' }).waitFor();
+  await page.getByRole('button', { name: '挑战 Day 1', exact: true }).waitFor();
   assert.equal(await page.locator('.weapon-choice[data-weapon="shotgun"]').getAttribute('aria-pressed'), 'true');
   await page.reload(); await page.waitForFunction(() => window.__ready);
   assert.equal(await page.locator('.weapon-choice[data-weapon="shotgun"]').getAttribute('aria-pressed'), 'true', 'purchased shotgun stays equipped after returning and refreshing');
   assert(await page.evaluate(() => window.__game.profile.owns('shotgun') && window.__game.profile.equipped === 'shotgun'));
   await page.locator('.weapon-choice[data-weapon="rifle"]').tap();
   assert.equal(await page.evaluate(() => window.__game.profile.equipped), 'rifle');
-  await page.getByRole('button', { name: '进入街道' }).tap();
+  // Explicit trial entry supports an owned gun without replacing saved equipment.
+  await page.evaluate(() => window.__game.begin('shotgun', { trial: true }));
+  assert(await page.evaluate(() => window.__game.round.trial && window.__game.round.weapon.id === 'shotgun' && window.__game.profile.equipped === 'rifle'));
+  await page.evaluate(() => window.__game.round.finish(false));
+  await page.getByRole('button', { name: '返回商店' }).tap();
+  await page.reload(); await page.waitForFunction(() => window.__ready);
+  assert.equal(await page.locator('.weapon-choice[data-weapon="rifle"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.evaluate(() => window.__game.profile.completedDay), 0);
+  await page.getByRole('button', { name: '挑战 Day 1', exact: true }).tap();
   await page.waitForFunction(() => window.__game.round.weapon.id === 'rifle' && window.__game.round.state === 'play');
   await page.waitForFunction(() => document.querySelector('.ammo').innerText === '24/24');
   assert.equal(await page.locator('.tutorial').count(), 0);
   assert(await page.evaluate(() => window.__game.round.hero.rifle.visible && !window.__game.round.hero.shotgun.visible));
 
-  // Freeze an active telegraphed attack via the real pause control.
-  await page.evaluate(() => {
-    const R = window.__game.round;
-    R.pool.forEach(z => { if (!z.demon) R.retire(z); }); R.spawnTick = () => {};
-    R.hero.root.position.set(16, 0, -12); R.encounter.actor.attackT = 0;
-  });
-  await page.waitForFunction(() => window.__game.round.encounter.projectiles.some(p => p.active));
-  await page.getByRole('button', { name: '暂停', exact: true }).tap();
-  const snapshot = () => page.evaluate(() => {
-    const E = window.__game.round.encounter;
-    return { cast: E.actor.cast, hp: E.actor.hp, age: E.projectiles.map(p => p.age), positions: E.projectiles.map(p => p.ball.position.toArray()) };
-  });
-  const frozen = await snapshot(); await page.waitForTimeout(400);
-  assert.deepEqual(await snapshot(), frozen);
-  await page.getByRole('button', { name: '继续游戏' }).tap();
-  await page.waitForTimeout(100); assert.notDeepEqual(await snapshot(), frozen);
+  // Standalone demon behavior is covered by combat-reaction-test.
   assert.deepEqual(errors, []);
-  console.log('PASS mobile owned weapon choice, ammo, shop and refresh persistence, result layout, and live demon pause');
+  console.log('PASS mobile weapon choice, ammo, equipment and trial persistence, and result layout');
 } finally { await browser.close(); }

@@ -9,16 +9,16 @@ try {
   await page.addInitScript(key => {
     localStorage.setItem(key, JSON.stringify({ version: 2, coins: 0, owned: ['rifle', 'shotgun'], equipped: 'rifle', levels: { rifle: 1, shotgun: 1 } }));
   }, PROFILE_KEY);
-  await page.goto('http://127.0.0.1:5191/?still'); await page.waitForFunction(() => window.__ready);
+  await page.goto(new URL('?still', process.env.ENCOUNTER_TEST_URL || 'http://127.0.0.1:5191/').href); await page.waitForFunction(() => window.__ready);
   const results = await page.evaluate(async () => {
     const THREE = await import('/node_modules/three/build/three.module.js');
-    const g = window.__game, R = g.round, camera = g.camera, E = R.encounter;
+    const g = window.__game, R = g.round, camera = g.camera;
     const idle = { move: { x: 0, y: 0 }, turn: 0, firing: false };
     const checks = [], check = (label, pass) => checks.push({ label, pass: !!pass });
     const step = (seconds, input = idle) => { for (let t = 0; t < seconds; t += 0.02) R.update(0.02, input, camera); };
-    const reset = (weapon = 'shotgun', demon = false) => {
+    const reset = (weapon = 'shotgun') => {
       R.reset(weapon); R.start(); R.spawnTick = () => {};
-      for (const z of R.pool) if (!demon || !z.demon) R.retire(z);
+      for (const z of R.pool) R.retire(z);
       R.hero.root.position.set(0, 0, -7); R.yaw = Math.PI;
       R.hero.aimPitch = 0; R.hero.t = 0; R.hero.recoil = 0;
     };
@@ -67,40 +67,8 @@ try {
     R.ballistics.scenery.splice(R.ballistics.scenery.indexOf(wall), 1);
     R.scene.remove(wall); wall.geometry.dispose(); wall.material.dispose();
 
-    reset('rifle', true); R.hero.root.position.set(0, 0, -12); step(4);
-    check('central north street bypass does not wake the demon', !E.actor.alert && E.projectiles.every(p => !p.active));
-    R.hero.root.position.set(15, 0, -5); R.yaw = Math.PI; fire(E.actor); flight(); E.actor.attackT = 0; step(0.1);
-    check('rifle range cannot damage the guard without provoking return fire', E.actor.hp < 36 && E.projectiles.some(p => p.active));
-    R.hero.root.position.set(-16, 0, 5); step(2.2);
-    check('guard disengages when player leaves its range', !E.actor.alert);
-    const rare = R.crates.find(c => c.rare); R.hero.root.position.set(rare.x, 0, rare.z); R.extraction.update(R, 2, idle);
-    check('guarded rare crate cannot be opened alive', rare.locked && !rare.opened && R.loot === 0);
-    reset('rifle', true); R.hero.root.position.set(16, 0, -12); E.actor.attackT = 0; step(0.1);
-    const p = E.projectiles.find(p => p.active); const aim = p?.target.clone();
-    check('cast starts with a fixed red warning, before ball release', p && p.ring.visible && !p.ball.visible);
-    R.hero.root.position.set(16, 0, -7); const hp = R.hp; step(0.8);
-    check('yellow ball follows a visible arc toward the warned point', p.ball.visible && p.ball.position.y > 0.5 && p.target.distanceTo(aim) < 0.001);
-    step(0.9); check('leaving the warning circle avoids damage', R.hp === hp && !p.active);
-    reset('rifle', true); R.hero.root.position.set(16, 0, -12); E.actor.attackT = 0; step(1.8);
-    check('staying in the blast costs one heart', R.hp === 4);
-    reset('rifle', true); R.hero.root.position.set(16, 0, -12); E.actor.attackT = 0; R.buffs.grant('shield'); step(1.8);
-    check('explosion does not consume bite-only shield', R.hp === 4 && R.buffs.has('shield'));
-    reset('rifle', true); R.hero.root.position.set(16, 0, -12); E.actor.attackT = 0; step(0.4);
-    R.state = 'paused'; const age = E.projectiles.find(p => p.active).age; E.update(4, R, camera);
-    check('paused encounter cannot advance projectile timers', E.projectiles.find(p => p.active).age === age); R.state = 'play';
-    const direction = R.hero.root.position.clone().sub(E.actor.root.position).normalize();
-    R.damage(E.actor, direction, 100);
-    check('demon death unlocks red crate and guarantees one buff', !rare.locked && E.actor.dead && R.buffs.drops.filter(d => d.mesh.visible).length === 1);
-    check('demon death clears live attacks', E.projectiles.every(p => !p.active));
-    R.hero.root.position.set(rare.x, 0, rare.z + 1); R.heroKick.set(0, 0, 0);
-    R.extraction.update(R, 0.02, idle); const coins = R.loot; R.extraction.update(R, 2, idle);
-    check('rare crate pays 180 coins once', coins === 180 && R.loot === 180 && R.opened === 1);
-    const bank = R.bank; R.finish(true);
-    check('rare loot uses normal evacuation settlement', R.bank === bank + 180);
-    reset('shotgun', true);
-    check('retry resets guard, lock, attacks and selected weapon', rare.locked && !rare.opened && E.actor.hp === 36 && !E.actor.dead && R.ammo === 6 && E.projectiles.every(p => !p.active));
-    R.hero.root.position.set(16, 0, -12); E.actor.attackT = 0; step(0.1); R.finish(false);
-    check('round end clears every warning and projectile', E.projectiles.every(p => !p.active && !p.ring.visible && !p.ball.visible));
+    // Campaign rewards/completion are covered by day-campaign-test;
+    // standalone demon reactions are covered by combat-reaction-test.
     return checks;
   });
   for (const r of results) console.log(r.pass ? 'PASS' : 'FAIL', r.label);

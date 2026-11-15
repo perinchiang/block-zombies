@@ -14,10 +14,9 @@ const state = page => page.evaluate(() => {
   return {
     state: R.state, time: R.time, elapsed: R.elapsed, hp: R.hp, pressure: R.pressure,
     shots: R.shots, ammo: R.ammo, reload: R.reloadT,
-    spawn: { timer: R.director.timer, graveTimer: R.director.graveTimer, gate: R.director.gate, pending: R.director.pending ? { ...R.director.pending } : null },
-    position: R.hero.root.position.toArray(), yaw: R.yaw, extracting: R.extracting,
+    spawn: { queue: R.director.queue.map(enemy => ({ ...enemy })), waveIndex: R.director.waveIndex, intermission: R.director.intermission, readyToComplete: R.director.readyToComplete },
+    position: R.hero.root.position.toArray(), yaw: R.yaw,
     buffs: { ...R.buffTimers }, loot: R.loot,
-    crates: R.crates.map(c => c.opened),
     bullets: R.ballistics.active.map(p => [p.position.toArray(), p.remaining, p.travelled]),
     zombies: R.pool.map(z => [z.active, z.dead, z.biteT, z.root.position.toArray()]),
   };
@@ -28,12 +27,12 @@ try {
   const page = await ctx.newPage(); track(page);
   await page.goto(base); await ready(page);
   assert.equal(await page.locator('.tutorial').count(), 1, 'first visit shows teaching before combat');
-  await page.getByRole('button', { name: '进入街道' }).tap();
+  await page.getByRole('button', { name: '挑战 Day 1' }).tap();
   await page.waitForFunction(() => window.__game.round.state === 'play');
-  assert.equal(await page.locator('#hud .turn, #hud .resources, #hud .objective, #hud .hint, #hud .notice').count(), 0);
+  assert.equal(await page.locator('#hud .turn, #hud .resources, #hud .objective, #hud .hint').count(), 0);
   await page.evaluate(() => {
     const R = window.__game.round;
-    R.loot = 72; R.opened = 2; R.buffs.grant('frenzy');
+    R.loot = 72; R.income.kills = 72; R.buffs.grant('frenzy');
   });
 
   // Pause with the other thumb still holding fire. Releasing/reusing that finger
@@ -49,9 +48,8 @@ try {
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [{ id: 1, ...fire }] });
   await page.waitForFunction(() => window.__game.round.state === 'paused');
   const frozen = await state(page);
-  assert.match(await page.locator('#panel').innerText(), /72\s*携带金币/);
-  const crateCount = await page.evaluate(() => window.__game.round.crates.length);
-  assert.match(await page.locator('#panel').innerText(), new RegExp(`2 / ${crateCount}\\s*已开物资箱`));
+  assert.match(await page.locator('#panel').innerText(), /Day 1/);
+  assert.match(await page.locator('#panel').innerText(), /72/);
   await page.keyboard.down('KeyW'); await page.keyboard.down('Space');
   await page.waitForTimeout(600);
   assert.deepEqual(await state(page), frozen, 'all gameplay stays frozen while paused');
@@ -71,41 +69,23 @@ try {
   await page.keyboard.up('KeyW'); await page.keyboard.up('Space');
   console.log('PASS mobile pause freezes combat, clocks, buffs and clears held inputs');
 
-  // Automatic crate collection and evacuation both respect pause.
-  for (const kind of ['crate', 'evac']) {
-    await page.evaluate(kind => {
-      window.__game.begin();
-      const R = window.__game.round;
-      R.pool.forEach(z => R.retire(z)); R.spawnTick = () => {};
-      if (kind === 'crate') {
-        const c = R.crates[0]; R.hero.root.position.set(c.x, 0, c.z + 1);
-        R.state = 'paused';
-      } else {
-        R.elapsed = 100; R.hero.root.position.set(R.evac.x, 0, R.evac.z);
-      }
-    }, kind);
-    if (kind === 'evac') {
-      await page.waitForFunction(() => window.__game.round.extracting > 0);
-      await page.getByRole('button', { name: '暂停', exact: true }).tap();
-    }
-    const before = await state(page);
-    await page.waitForTimeout(400);
-    assert.deepEqual(await state(page), before, `${kind} stays frozen`);
-    if (kind === 'crate') {
-      assert.equal(before.crates[0], false, 'paused crate is not collected');
-      await page.evaluate(() => {
-        const R = window.__game.round;
-        R.state = 'play'; R.extraction.update(R, 0.001, { move: { x: 0, y: 0 }, firing: false });
-      });
-      assert.equal((await state(page)).crates[0], true, 'crate collects on the first active update');
-    } else await page.getByRole('button', { name: '继续游戏' }).tap();
-  }
-  console.log('PASS automatic crate pickup and evacuation respect pause');
+  // Fixed wave queues must also remain unchanged while paused.
+  await page.evaluate(() => {
+    const R = window.__game.round;
+    R.pool.forEach(z => R.retire(z));
+    R.director.queue = [{ x: 19, z: 10, runner: false, bounty: 20 }];
+    R.director.readyToComplete = false;
+    R.state = 'paused';
+  });
+  const queued = await state(page);
+  await page.waitForTimeout(400);
+  assert.deepEqual(await state(page), queued, 'queued wave stays frozen');
+  console.log('PASS fixed wave queue respects pause');
 
   await page.evaluate(() => window.__game.begin());
-  assert.equal(await page.locator('.tutorial').count(), 0, 'retry does not repeat tutorial');
+  assert.equal(await page.locator('.tutorial:visible').count(), 0, 'retry does not repeat tutorial');
   await page.reload(); await ready(page);
-  await page.getByRole('button', { name: '进入街道' }).waitFor();
+  await page.getByRole('button', { name: '挑战 Day 1' }).waitFor();
   assert.equal(await page.locator('.tutorial').count(), 0, 'refresh returns to the shop without repeating tutorial');
   assert.equal(await page.locator('.weapon-choice[data-weapon="rifle"]').getAttribute('aria-pressed'), 'true');
   console.log('PASS first-visit tutorial stays dismissed across retry and refresh');
