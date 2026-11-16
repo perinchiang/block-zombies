@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { COL } from '../render/palette.js';
+import { NO_INK_LAYER } from '../render/inkline.js';
 
 export const BULLET_SPEED = 48;
 
@@ -10,8 +12,10 @@ export class Ballistics {
     this.scenery = scenery;
     this.ray = new THREE.Raycaster();
     this.active = [];
-    this.mesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.035, 4, 3),
-      new THREE.MeshBasicMaterial({ color: 0xffd36a }), 256);
+    this.mesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.075, 6, 4),
+      new THREE.MeshBasicMaterial({ color: COL.flash, depthWrite: false }), 256);
+    this.mesh.layers.set(NO_INK_LAYER);
+    this.mesh.renderOrder = 1; // pale head over its own orange streak
     this.mesh.frustumCulled = false;
     this.mesh.count = 0;
     round.scene.add(this.mesh);
@@ -107,6 +111,7 @@ export class Ballistics {
         } else {
           if (hit.blocked) {
             this.round.fx.spray(hit.point, p.dir.clone().negate(), 3, 'ink', 1.5);
+            this.round.fx.impact?.(hit.point.clone().addScaledVector(p.dir, -0.06), 0.55);
             ended = true;
           }
           break;
@@ -121,6 +126,7 @@ export class Ballistics {
       p.shot.controlled.add(z);
       this.round.damage(z, p.dir, (p.weapon.id === 'shotgun' && distance > 6 ? 0.4 : 1) * (p.weapon.damageMultiplier ?? 1),
         p.weapon.knockback, { weaponId: p.weapon.id, control });
+      this.round.fx.impact?.(point.clone().addScaledVector(p.dir, -0.12), z.dead ? 1.9 : 0.9);
       if (p.shot.blast && !p.shot.exploded) {
         p.shot.exploded = true;
         this.round.fx.spray(point, new THREE.Vector3(0, 1, 0), 18, 'ink', 4);

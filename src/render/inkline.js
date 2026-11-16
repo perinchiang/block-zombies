@@ -53,6 +53,9 @@ const FRAG = /* glsl */ `
   }
 `;
 
+/** Objects on this layer are drawn in colour only: no outline, no crease lines. */
+export const NO_INK_LAYER = 1;
+
 export class InkLine {
   constructor(renderer) {
     this.renderer = renderer;
@@ -113,7 +116,9 @@ export class InkLine {
     r.setRenderTarget(this.normal);
     r.setClearColor(0x8080ff, 1);
     r.clear();
+    camera.layers.disable(NO_INK_LAYER);
     r.render(scene, camera);
+    camera.layers.enable(NO_INK_LAYER);
     scene.overrideMaterial = null;
     scene.background = bg;
     scene.fog = f;

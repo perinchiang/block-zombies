@@ -25,6 +25,7 @@ export const HEX = {
   zombieCloth: '#8e939b',
   blood: '#c4322b',     // danger and damage only
   flash: '#fff3c4',
+  fire: '#f2761b',      // gunfire only: muzzle, tracers and impact bursts
 };
 
 export const COL = Object.fromEntries(Object.entries(HEX).map(([k, v]) => [k, new THREE.Color(v)]));

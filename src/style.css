@@ -3,6 +3,7 @@
   --ink: #1d1b21;
   --blood: #c4322b;
   --hero: #e0a43a;
+  --gold: #f2b429;
   --safe-l: env(safe-area-inset-left, 0px);
   --safe-r: env(safe-area-inset-right, 0px);
   --font: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
@@ -30,10 +31,21 @@ html, body {
 .kills b { font-size: 20px; }
 .coins { left: calc(18px + var(--safe-l)); top: 50px; font-size: 12px; padding: 3px 7px; transform: rotate(-2deg); }
 .coins b { font-size: 18px; font-variant-numeric: tabular-nums; }
-.coin-pulse { position: absolute; left: 50%; top: -5px; color: var(--blood); opacity: 0; pointer-events: none; }
-.coin-pulse.show { animation: coin-rise .8s ease-out both; }
+.coins::before, .floater::before {
+  content: ""; display: inline-block; width: 0.82em; height: 0.82em; margin-right: 4px; vertical-align: -0.08em;
+  border-radius: 50%; background: var(--gold); border: 2px solid var(--ink); box-shadow: inset -2px -2px 0 rgba(29, 27, 33, 0.25);
+}
+.coins::before { font-size: 16px; }
+.coins.bump { animation: coin-bump 0.28s ease-out; }
+@keyframes coin-bump { 0% { transform: rotate(-2deg) scale(1); } 35% { transform: rotate(-2deg) scale(1.22); background: var(--gold); } 100% { transform: rotate(-2deg) scale(1); } }
+/* reward numbers rise from where the coins were earned */
+.floaters { position: absolute; inset: 0; overflow: hidden; }
+.floater {
+  position: absolute; left: 0; top: 0; white-space: nowrap; font-size: 20px; color: var(--gold);
+  -webkit-text-stroke: 4px var(--ink); paint-order: stroke fill; will-change: transform, opacity;
+}
+.floater.big { font-size: 32px; }
 .notice { position: absolute; left: 50%; top: 54px; max-width: min(72vw, 420px); padding: 3px 8px; transform: translateX(-50%); background: var(--paper); border: 2px solid var(--ink); font-size: 12px; text-align: center; }
-@keyframes coin-rise { 0% { opacity: 0; transform: translate(-50%, 8px) scale(.8); } 20% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -22px) scale(1.1); } }
 .ammo { right: calc(82px + var(--safe-r)); font-size: 15px; padding: 0 10px; }
 .ammo b { font-size: 26px; font-variant-numeric: tabular-nums; }
 .reload { position: absolute; top: 56px; right: calc(82px + var(--safe-r)); font-size: 16px; padding: 0 8px; background: var(--ink); color: var(--paper); }

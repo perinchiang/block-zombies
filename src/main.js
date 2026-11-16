@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { COL } from './render/palette.js';
 import { LIGHT, TOON } from './render/toon.js';
-import { InkLine } from './render/inkline.js';
+import { InkLine, NO_INK_LAYER } from './render/inkline.js';
 import { buildArena, BOUNDS } from './world/arena.js';
 import { resolvePosition } from './world/navigation.js';
 import { Round } from './game/round.js';
@@ -63,6 +63,14 @@ const round = new Round({
     shake: (a) => (cam.shake = Math.max(cam.shake, a)),
     hitstop: (t) => (hitstop = Math.max(hitstop, t)),
     hurt: () => hud.hurt(),
+    // Coins are already banked when this fires; this only makes the reward felt.
+    reward: ({ kind, amount, at }) => {
+      const pack = kind === 'pickups';
+      let landed = 0;
+      fx.coins(at, pack ? 10 : Math.min(3, amount), round.hero.root.position, () => sfx.coin(landed++));
+      hud.floater(`+${amount}`, at, pack);
+      if (pack) sfx.jackpot();
+    },
     end: (win, s) => {
       window.__game.result = { win, ...s };
       syncInput();
@@ -81,8 +89,10 @@ const input = new Input(canvas, { stick: document.querySelector('.stick'), knob:
 // Over-the-shoulder rig, in hero space: right, up, back.
 const CAM_OFF = vec(params.get('cam'), new THREE.Vector3(1.15, 1.65, 5.2));
 const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 120);
+camera.layers.enable(NO_INK_LAYER);
 scene.add(camera);
 const ink = new InkLine(renderer);
+fx.camera = camera;
 const rotateEl = document.getElementById('rotate');
 let W = 1, H = 1, portrait = false;
 let mouseLocked = false, resumeWithMouse = false, resuming = false;
@@ -216,17 +226,22 @@ function autopilot(dt) {
     if (d < nd) { nd = d; near = z; }
   }
   if (!near) return { move: { x: bot.strafe * 0.3, y: 0 }, turn: 0, firing: false };
-  const want = Math.atan2(near.root.position.x - hp.x, near.root.position.z - hp.z);
+  // The sight is the camera's ray, and the camera sits off the shoulder: aim
+  // from there, or every shot passes a metre beside the target.
+  const chest = round.chest(near, _f.clone()), eye = camera.position;
+  const want = Math.atan2(chest.x - eye.x, chest.z - eye.z);
   let d = want - round.yaw;
   d = Math.atan2(Math.sin(d), Math.cos(d));
+  const tilt = Math.atan2(chest.y - eye.y, Math.hypot(chest.x - eye.x, chest.z - eye.z)) - round.pitch;
+  const pitch = THREE.MathUtils.clamp(tilt, -(weak ? 1.2 : 4) * dt, (weak ? 1.2 : 4) * dt);
   if (weak) {
     bot.react -= dt;
     const turn = bot.react > 0 ? 0 : THREE.MathUtils.clamp(d, -1.8 * dt, 1.8 * dt);
     if (Math.abs(d) > 0.6 && bot.react <= -0.6) bot.react = 0.35; // loses track now and then
-    return { move: { x: bot.strafe * 0.25, y: 0 }, turn, firing: Math.abs(d) < 0.12 };
+    return { move: { x: bot.strafe * 0.25, y: 0 }, turn, pitch, firing: Math.abs(d) < 0.12 };
   }
   const turn = THREE.MathUtils.clamp(d, -5 * dt, 5 * dt);
-  return { move: { x: bot.strafe * 0.6, y: nd < 4.5 ? -1 : nd > 9 ? 0.4 : -0.2 }, turn, firing: Math.abs(d) < 0.25 };
+  return { move: { x: bot.strafe * 0.6, y: nd < 4.5 ? -1 : nd > 9 ? 0.4 : -0.2 }, turn, pitch, firing: Math.abs(d) < 0.08 && Math.abs(tilt) < 0.08 };
 }
 
 // Zombies close by but outside the view: shown as red ink arrows on the edge.
@@ -355,6 +370,7 @@ function frame(now) {
   // A fixed sight never snaps to a target; muzzle obstruction is physical.
   hud.update(round, paused ? 0 : raw, { x: W / 2, y: H / 2 });
   hud.threats(threatsAround(), W, H);
+  hud.floaters(camera, W, H, paused ? 0 : raw);
 
   ink.render(scene, camera, scene.fog);
   if (++frames === 3) window.__ready = true;

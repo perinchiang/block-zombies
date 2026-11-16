@@ -128,16 +128,3 @@ export function splat(color, radius, seed = 1) {
   grp.position.y = 0.02;
   return grp;
 }
-
-/** Comic muzzle flash: a flat star facing the camera. */
-export function muzzleFlash() {
-  const shape = new THREE.Shape();
-  const n = 7;
-  for (let i = 0; i <= n * 2; i++) {
-    const a = (i / (n * 2)) * Math.PI * 2;
-    const k = i % 2 ? 0.08 : 0.26 + (i % 4 === 0 ? 0.08 : 0);
-    const x = Math.cos(a) * k, y = Math.sin(a) * k;
-    i === 0 ? shape.moveTo(x, y) : shape.lineTo(x, y);
-  }
-  return new THREE.Mesh(new THREE.ShapeGeometry(shape), flat(COL.flash, { side: THREE.DoubleSide }));
-}
