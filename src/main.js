@@ -3,6 +3,7 @@ import { COL } from './render/palette.js';
 import { LIGHT, TOON } from './render/toon.js';
 import { InkLine } from './render/inkline.js';
 import { buildArena, BOUNDS } from './world/arena.js';
+import { resolvePosition } from './world/navigation.js';
 import { Round } from './game/round.js';
 import { Fx } from './game/fx.js';
 import { Input } from './game/input.js';
@@ -141,6 +142,7 @@ function begin(weaponId = hud.selectedWeapon, { trial = false, mode = 'campaign'
   hitstop = 0;
   cam.shake = 0;
   cam.offset.set(0, 0, 0);
+  camRig.t = camRig.side = camRig.wantSide = 1;
 }
 
 function pause() {
@@ -252,24 +254,57 @@ const fpsEl = params.has('fps') ? Object.assign(document.body.appendChild(docume
 let last = performance.now(), frames = 0, ftAvg = 16;
 const stats = { frames: 0, slow: 0 };
 
-function updateCamera() {
+// Near end of the rig: the hero's own eye line, which is always clear of walls.
+const camRig = { t: 1, side: 1, wantSide: 1, hidden: false };
+const CAM_CLEAR = 0.24; // keeps the near plane out of wall faces
+const _eye = new THREE.Vector3(), _arm = new THREE.Vector3(), _far = new THREE.Vector3();
+
+/** Full rig position for a shoulder (1 right .. -1 left), before any obstruction. */
+function rigPoint(side, out) {
+  const hp = round.hero.root.position;
+  out.copy(_r).multiplyScalar(CAM_OFF.x * side).addScaledVector(_f, -CAM_OFF.z).setY(CAM_OFF.y - 0.65);
+  // Orbit around the lower torso so the whole hero fits below the sight.
+  out.applyAxisAngle(_r, round.pitch).add(hp);
+  out.y += 0.65;
+  out.x = THREE.MathUtils.clamp(out.x, -BOUNDS.x + 0.2, BOUNDS.x - 0.2);
+  out.z = THREE.MathUtils.clamp(out.z, BOUNDS.zMin + 0.2, BOUNDS.zMax - 0.2);
+  out.y = Math.max(0.25, out.y);
+  return out;
+}
+
+/** How far along eye -> rig the camera may travel: 1 is the whole way. */
+function rigClearance(side) {
+  _arm.copy(rigPoint(side, _far)).sub(_eye);
+  const reach = _arm.length();
+  const hit = round.ballistics.trace(_eye, _arm.divideScalar(reach), reach, new Set(), true);
+  return hit.blocked ? THREE.MathUtils.clamp((hit.distance - CAM_CLEAR) / reach, 0, 1) : 1;
+}
+
+function updateCamera(dt = 0) {
   const hp = round.hero.root.position;
   _f.set(Math.sin(round.yaw), 0, Math.cos(round.yaw));
   _r.set(-Math.cos(round.yaw), 0, Math.sin(round.yaw));
-  // Orbit around the lower torso so the whole hero fits below the sight.
-  // Keep the rig low and far enough back to show the feet at normal aim angles;
-  // ground/wall clearance still keeps extreme angles outside the scenery.
-  const pivot = hp.clone().setY(0.65);
-  const offset = _r.clone().multiplyScalar(CAM_OFF.x).addScaledVector(_f, -CAM_OFF.z).setY(CAM_OFF.y - pivot.y);
-  offset.applyAxisAngle(_r, round.pitch);
-  const want = pivot.clone().add(offset);
-  want.x = THREE.MathUtils.clamp(want.x, -BOUNDS.x + 0.2, BOUNDS.x - 0.2);
-  want.z = THREE.MathUtils.clamp(want.z, BOUNDS.zMin + 0.2, BOUNDS.zMax - 0.2);
-  want.y = Math.max(0.25, want.y);
   round.scene.updateMatrixWorld(true);
-  const arm = want.clone().sub(pivot);
-  const obstruction = round.ballistics.trace(pivot, arm.clone().normalize(), arm.length(), new Set(), true);
-  if (obstruction.blocked) want.copy(pivot).addScaledVector(arm.normalize(), Math.max(0, obstruction.distance - 0.2));
+  _eye.copy(hp).setY(1.3).addScaledVector(_f, 0.1);
+  // A wall on the camera's side would fill half the frame: use the other shoulder
+  // while that one is clearly more open, and come back once the right is free.
+  const right = rigClearance(1), left = right < 0.75 ? rigClearance(-1) : 0;
+  if (camRig.wantSide > 0 ? left > right + 0.2 : right >= 0.9 || right >= left) camRig.wantSide = -camRig.wantSide;
+  camRig.side += THREE.MathUtils.clamp(camRig.wantSide - camRig.side, -dt * 5, dt * 5);
+  // With a wall behind the hero the camera slides forward along the line from
+  // the full rig to the eye line. It ends in a first-person view rather than
+  // inside the torso, so the street ahead is never covered by the hero.
+  const allowed = rigClearance(camRig.side);
+  // Close in at once, ease back out so passing a pillar does not pump the view.
+  camRig.t = allowed < camRig.t ? allowed : Math.min(allowed, camRig.t + dt * 2.2);
+  const want = rigPoint(camRig.side, _far).sub(_eye).multiplyScalar(camRig.t).add(_eye);
+  // A ray is thin; the near plane is not. Keep clear of faces beside the path.
+  if (camRig.t > 0.02) resolvePosition(want, CAM_CLEAR, round.colliders.filter((c) => c.height > want.y - 0.15));
+  const near = Math.hypot(want.x - hp.x, want.z - hp.z);
+  // Up close the hero would fill the frame: ghost first, then drop out entirely.
+  camRig.hidden = near < (camRig.hidden ? 1.0 : 0.85);
+  round.hero.root.visible = !camRig.hidden;
+  round.hero.setGhost(THREE.MathUtils.smoothstep(near, 0.9, 2.3));
   camera.position.copy(want).add(cam.offset);
   const direction = _f.clone().multiplyScalar(Math.cos(round.pitch)).setY(Math.sin(round.pitch));
   camera.lookAt(camera.position.clone().add(direction));
@@ -298,7 +333,7 @@ function frame(now) {
 
   const hp = round.hero.root.position;
   if (!paused) {
-    updateCamera();
+    updateCamera(raw);
     round.resolveAim(camera);
   }
 

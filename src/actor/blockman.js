@@ -147,6 +147,16 @@ export class BlockMan {
     for (const band of this.weaponBands ?? []) band.mesh.visible = this.weaponLevel >= band.level;
   }
 
+  /** 0 = see-through, 1 = solid. Lets the street show when the camera is pushed in. */
+  setGhost(alpha) {
+    const a = Math.max(0.16, Math.min(1, alpha));
+    if (a === this.ghost) return;
+    this.ghost = a;
+    for (const m of this.meshes) {
+      for (const mat of [].concat(m.userData.mat)) { mat.transparent = a < 1; mat.opacity = a; }
+    }
+  }
+
   /** Brief paper-white flash, the comic "hit" frame. */
   flash(t = 0.07) {
     this.flashT = t;

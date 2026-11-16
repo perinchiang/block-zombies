@@ -44,6 +44,17 @@ try {
         R.hero.root.position.set(x, 0, z); await view(-0.18);
         check(`camera stays within square walls at (${x}, ${z})`, Math.abs(camera.position.x) <= 19.8 && Math.abs(camera.position.z) <= 19.8 && camera.position.y >= 0.25);
       }
+      // Walls: the hero must never fill the frame from inside the rig.
+      const settle = () => new Promise(done => setTimeout(done, 700));
+      R.hero.root.position.set(-10, 0, -5.65); R.yaw = 0; await view(-0.18); await settle();
+      check('back to a wall: camera rises to the eye line and drops the hero from view',
+        camera.position.y > 1.1 && camera.position.z > -6 && R.hero.root.visible === false);
+      R.hero.root.position.set(-6.65, 0, -9); R.yaw = 0; await view(-0.18); await settle();
+      check('wall on the right: camera takes the left shoulder at full reach',
+        camera.position.x > R.hero.root.position.x + 0.8 && camera.position.distanceTo(R.hero.root.position) > 4 && R.hero.root.visible);
+      R.hero.root.position.set(0, 0, 5); R.yaw = Math.PI; await view(-0.18); await settle();
+      check('open ground: camera returns to the right shoulder with a solid hero',
+        camera.position.x > 1 && R.hero.root.visible && R.hero.ghost === 1);
       return checks;
     });
     results.forEach(r => console.log(r.pass ? 'PASS' : 'FAIL', `${width}×${height}`, r.label));
