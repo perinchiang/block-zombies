@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { toon } from '../render/toon.js';
 import { COL } from '../render/palette.js';
 import { heroFace, zombieFace, zombieShirt, heroJacket } from './faces.js';
+import { buildGun, GUN_SCALE } from './guns.js';
 
 // Big-headed block figure. Limbs are rigid boxes that swing from a pivot:
 // the stiffness is the style, so there is no skinning or IK anywhere.
@@ -25,7 +26,7 @@ function looks(kind, variant) {
     skin: toon(zombie ? COL.zombie : COL.skin, { hatch: false }),
     cloth: toon(zombie ? COL.zombieCloth : COL.hero),
     pants: toon(zombie ? COL.rust : COL.heroDark, { shadeInk: 0.35 }),
-    hair: toon(COL.ink, { hatch: false }),
+    hair: toon(zombie ? COL.ink : COL.hair, { hatch: false, mid: 0.85 }),
     face: toon(0xffffff, { map: zombie ? zombieFace(variant) : heroFace(), hatch: false }),
     chest: toon(0xffffff, { map: zombie ? zombieShirt(variant) : heroJacket() }),
   };
@@ -77,7 +78,11 @@ export class BlockMan {
       const cap = part(box(hs * 1.06, hs * 0.22, hs * 1.06), M.hair, hs + 0.02);
       const back = part(box(hs * 1.06, hs * 0.86, hs * 0.18), M.hair, hs * 0.57);
       back.position.z = -hs * 0.46;
-      this.head.add(cap, back);
+      // Paper headband, knotted at the back: the mark you follow from behind.
+      const cloth = toon(COL.paper, { hatch: false, mid: 0.86 });
+      const band = part(box(hs * 1.1, hs * 0.16, hs * 1.1), cloth, hs * 0.74);
+      const knot = part(box(0.13, 0.11, 0.06), cloth, hs * 0.72); knot.position.z = -hs * 0.6;
+      this.head.add(cap, back, band, knot);
     }
     this.torso.add(this.head);
 
@@ -90,39 +95,34 @@ export class BlockMan {
     this.torso.add(this.armL, this.armR);
 
     if (!zombie) {
-      const gunMat = toon(COL.ink, { hatch: false });
-      const metal = toon(COL.stone, { mid: 0.7 });
+      // Backpack and bedroll: most of the game is spent looking at this side.
+      const canvas = toon(COL.pack, { mid: 0.82 });
+      const pack = part(box(0.36, 0.36, 0.17), canvas, 0.27); pack.position.z = -0.22;
+      const flap = part(box(0.37, 0.1, 0.18), toon(COL.heroDark, { hatch: false }), 0.4); flap.position.z = -0.225;
+      const roll = part(box(0.44, 0.12, 0.13), toon(COL.paperShade, { hatch: false, mid: 0.86 }), 0.53); roll.position.z = -0.2;
+      const pocket = part(box(0.2, 0.13, 0.04), canvas, 0.2); pocket.position.z = -0.32;
+      this.torso.add(pack, flap, roll, pocket);
+
       this.gun = new THREE.Group();
-      this.rifle = new THREE.Group();
-      this.shotgun = new THREE.Group();
-      this.rifle.add(part(box(0.1, 0.13, 0.62), gunMat, 0));
-      const mag = part(box(0.07, 0.16, 0.08), gunMat, -0.12); mag.position.z = 0.06;
-      const barrel = part(box(0.05, 0.05, 0.22), metal, 0.02); barrel.position.z = 0.42;
-      const stock = part(box(0.08, 0.1, 0.16), metal, -0.03); stock.position.z = -0.3;
-      this.rifle.add(mag, barrel, stock);
-      const wood = toon(COL.hero, { mid: 0.75 });
-      this.shotgun.add(part(box(0.14, 0.16, 0.55), gunMat));
-      const tube = part(box(0.11, 0.09, 0.42), metal, 0.06); tube.position.z = 0.38;
-      const pump = part(box(0.19, 0.13, 0.25), wood, -0.03); pump.position.z = 0.27;
-      const butt = part(box(0.14, 0.17, 0.26), wood, -0.05); butt.position.z = -0.34;
-      this.shotgun.add(tube, pump, butt);
       this.weaponBands = [];
-      for (const weapon of [this.rifle, this.shotgun]) {
-        for (let i = 0; i < 4; i++) {
-          const band = part(box(0.21, 0.21, 0.035), metal, 0.02);
-          band.position.z = -0.18 + i * 0.09;
-          band.visible = false;
-          weapon.add(band);
-          this.weaponBands.push({ mesh: band, level: i + 2 });
-        }
+      this.guns = {};
+      for (const id of ['rifle', 'shotgun']) {
+        const bands = [];
+        const gun = this.guns[id] = buildGun(id, bands);
+        gun.visible = id === 'rifle';
+        this.gun.add(gun);
+        for (const band of bands) this.weaponBands.push(band);
       }
-      this.shotgun.visible = false;
-      this.gun.add(this.rifle, this.shotgun);
-      this.gun.position.set(0, -0.44, 0.1);
+      this.rifle = this.guns.rifle;
+      this.shotgun = this.guns.shotgun;
+      this.gun.scale.setScalar(GUN_SCALE);
+      // Carried on the outside of the forearm so it is not hidden behind the arm
+      // from the shoulder camera.
+      this.gun.position.set(-0.1, -0.44, 0.13);
       this.gun.rotation.set(Math.PI / 2 - 0.37, 0, 0); // level the barrel despite the lowered arm
       this.armR.add(this.gun);
       this.muzzle = new THREE.Object3D();
-      this.muzzle.position.set(0, 0.02, 0.55);
+      this.muzzle.position.set(0, 0.02, this.rifle.userData.muzzle);
       this.gun.add(this.muzzle);
     }
 
@@ -137,14 +137,24 @@ export class BlockMan {
   setWeapon(id) {
     if (!this.gun) return;
     this.weaponId = id;
-    this.rifle.visible = id !== 'shotgun';
-    this.shotgun.visible = id === 'shotgun';
-    this.muzzle.position.z = id === 'shotgun' ? 0.6 : 0.55;
+    const shown = Object.hasOwn(this.guns, id) ? id : 'rifle';
+    for (const [key, gun] of Object.entries(this.guns)) gun.visible = key === shown;
+    this.muzzle.position.z = this.guns[shown].userData.muzzle;
   }
 
   setWeaponLevel(level) {
     this.weaponLevel = Math.max(1, Math.floor(Number(level) || 1));
     for (const band of this.weaponBands ?? []) band.mesh.visible = this.weaponLevel >= band.level;
+  }
+
+  /** 0 = see-through, 1 = solid. Lets the street show when the camera is pushed in. */
+  setGhost(alpha) {
+    const a = Math.max(0.16, Math.min(1, alpha));
+    if (a === this.ghost) return;
+    this.ghost = a;
+    for (const m of this.meshes) {
+      for (const mat of [].concat(m.userData.mat)) { mat.transparent = a < 1; mat.opacity = a; }
+    }
   }
 
   /** Brief paper-white flash, the comic "hit" frame. */
@@ -187,9 +197,9 @@ export class BlockMan {
       this.legR.rotation.x = -s * 0.7;
       this.recoil = Math.max(0, this.recoil - dt * (this.weaponId === 'shotgun' ? 5 : 12));
       // shouldered rifle: right arm points forward, left arm braces the barrel
-      this.armR.rotation.set(-1.2 - this.recoil * 0.25, 0, 0.08);
+      this.armR.rotation.set(-1.2 - this.recoil * 0.25, 0, 0.16);
       this.armL.rotation.set(-1.0 - this.recoil * 0.2, 0, -0.85);
-      this.gun.position.z = 0.1 - this.recoil * 0.06;
+      this.gun.position.z = 0.13 - this.recoil * 0.07;
       this.torso.rotation.y = -0.12;
       this.torso.rotation.x = -(this.aimPitch ?? 0) - this.recoil * 0.04;
       this.head.rotation.y = 0.12;

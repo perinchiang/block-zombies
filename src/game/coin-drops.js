@@ -1,12 +1,26 @@
 import * as THREE from 'three';
+import { toon } from '../render/toon.js';
+import { COL } from '../render/palette.js';
 
 export class CoinDrops {
   constructor(scene, capacity = 4) {
     this.scene = scene;
+    const gold = toon(COL.gold, { hatch: false, mid: 0.86, shadeInk: 0.2 });
+    const disc = new THREE.CylinderGeometry(0.2, 0.2, 0.07, 12);
     this.items = Array.from({ length: capacity }, () => {
       const root = new THREE.Group();
-      const material = new THREE.MeshStandardMaterial({ color: 0xe0ad35, roughness: 0.48, metalness: 0.45 });
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.18, 0.28), material);
+      // A short stack with one coin standing on top and spinning.
+      for (let i = 0; i < 3; i++) {
+        const coin = new THREE.Mesh(disc, gold);
+        coin.position.set((i - 1) * 0.05, -0.16 + i * 0.075, i === 1 ? 0.05 : 0);
+        coin.castShadow = true;
+        coin.userData.noBulletCollision = true;
+        root.add(coin);
+      }
+      const mesh = new THREE.Mesh(disc, gold);
+      mesh.rotation.x = Math.PI / 2;
+      mesh.position.y = 0.3;
+      mesh.castShadow = true;
       mesh.userData.noBulletCollision = true;
       root.add(mesh);
       root.visible = false;
@@ -25,8 +39,7 @@ export class CoinDrops {
     item.phase = 0;
     item.root.position.copy(position).setY(0.45);
     item.root.visible = true;
-    item.mesh.material.color.setHex(value > 3 ? 0xf1c94b : 0xc69b45);
-    item.root.scale.setScalar(value > 3 ? 1.2 : 0.8);
+    item.root.scale.setScalar(value > 3 ? 1.25 : 0.85);
     return true;
   }
 
@@ -36,7 +49,7 @@ export class CoinDrops {
     for (const item of this.items) {
       if (!item.active) continue;
       item.phase += dt;
-      item.root.rotation.y += dt * 2.5;
+      item.mesh.rotation.y += dt * 5;
       item.root.position.y = 0.42 + Math.sin(item.phase * 3) * 0.08;
       const distance = item.root.position.distanceTo(hero);
       if (distance <= 2.5) {
@@ -44,7 +57,7 @@ export class CoinDrops {
         item.active = false;
         item.root.visible = false;
         item.value = 0;
-        round.awardCoins('pickups', value);
+        round.awardCoins('pickups', value, item.root.position);
       } else if (distance < 5) {
         item.root.position.lerp(hero.clone().setY(0.45), Math.min(1, dt * 2.5));
       }
@@ -58,7 +71,7 @@ export class CoinDrops {
       item.active = false;
       item.root.visible = false;
       item.value = 0;
-      round.awardCoins('pickups', value);
+      round.awardCoins('pickups', value, item.root.position);
     }
   }
 

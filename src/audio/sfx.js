@@ -124,6 +124,20 @@ export class Sfx {
     this.burst({ dur: 0.03, gain: 0.2, type: 'highpass', f0: 4000, f1: 3000 });
   }
 
+  /** One coin landing. `step` raises the pitch so a run of coins climbs. */
+  coin(step = 0) {
+    if (!this.ok) return;
+    const k = 2 ** (Math.min(step, 7) / 12);
+    this.tone({ dur: 0.06, gain: 0.16, f0: 1568 * k, f1: 1568 * k, type: 'triangle' });
+    this.tone({ t: 0.045, dur: 0.13, gain: 0.14, f0: 2093 * k, f1: 2093 * k, type: 'triangle' });
+  }
+
+  /** A coin pack: a short rising run under the individual coins. */
+  jackpot() {
+    if (!this.ok) return;
+    [523, 659, 784, 1047].forEach((f, i) => this.tone({ t: i * 0.07, dur: 0.22, gain: 0.2, f0: f, f1: f, type: 'square' }));
+  }
+
   win() {
     if (!this.ok) return;
     [0, 0.12, 0.24].forEach((t, i) => this.tone({ t, dur: 0.3, gain: 0.25, f0: 392 * [1, 1.25, 1.5][i], f1: 392 * [1, 1.25, 1.5][i], type: 'triangle' }));

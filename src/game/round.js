@@ -112,6 +112,7 @@ export class Round {
     for (const z of this.pool) this.retire(z);
     this.encounter.cancelShots();
     this.fx.clearDecals();
+    this.fx.clearCoins?.();
     this.resolveAim();
   }
 
@@ -124,13 +125,15 @@ export class Round {
   get waveCount() { return this.director.waveCount; }
   get remainingEnemies() { return this.director.remaining(this); }
 
-  awardCoins(kind, amount) {
+  /** `at` is where the reward came from; it only drives feedback, never the amount. */
+  awardCoins(kind, amount, at = null) {
     if (this.state !== 'play' || this.trial || !['kills', 'pickups'].includes(kind) || !Number.isSafeInteger(amount) || amount <= 0) return 0;
     const credited = this.profile ? this.profile.earn(amount) : amount;
     this.bank = this.profile ? this.profile.coins : this.bank + credited;
     this.income[kind] += credited;
     this.loot += credited;
     this.coinPulse = { serial: this.coinPulse.serial + 1, amount: credited, kind };
+    if (credited > 0 && at) this.hooks.reward?.({ kind, amount: credited, at });
     return credited;
   }
 
@@ -263,7 +266,7 @@ export class Round {
     hitZ.deadT = 0;
     hitZ.vel.addScaledVector(push, 2.5);
     this.kills++;
-    this.awardCoins('kills', hitZ.coinValue ?? 0);
+    this.awardCoins('kills', hitZ.coinValue ?? 0, end);
     if (hitZ.coinPackValue > 0) this.coinDrops.drop(hitZ.root.position, hitZ.coinPackValue);
     if (hitZ.demon) { this.encounter.cancelShots(); this.encounter.health.visible = false; }
     else if (Math.random() < 0.2) this.buffs.drop(hitZ.root.position);

@@ -1,8 +1,11 @@
+import * as THREE from 'three';
 import { TUNE } from '../game/round.js';
 import { WEAPONS, buildWeapon, UPGRADE_COSTS } from '../game/weapons.js';
 import { SHOP_PRICES } from '../game/profile.js';
+import { gunIcon } from '../actor/guns.js';
 
 const $ = (s, r = document) => r.querySelector(s);
+const _p = new THREE.Vector3();
 
 export class Hud {
   constructor() {
@@ -11,11 +14,11 @@ export class Hud {
     this.clock = $('.clock', this.el);
     this.kills = $('.kills b', this.el);
     this.coins = $('.coins b', this.el);
-    this.coinPulse = $('.coin-pulse', this.el);
     this.notice = $('.notice', this.el);
     this.ammo = $('.ammo b', this.el);
     this.ammoMax = $('.ammo', this.el);
     this.reload = $('.reload', this.el);
+    this.gunTag = $('.gun-tag', this.el);
     this.cross = $('.cross', this.el);
     this.hurtEl = $('#hurt');
     this.pauseButton = $('.pause', this.el);
@@ -24,14 +27,19 @@ export class Hud {
     this.buffEdge = $('.buff-edge', this.el);
     this.threatBox = $('.threats', this.el);
     this.threatEls = Array.from({ length: 4 }, () => this.threatBox.appendChild(Object.assign(document.createElement('div'), { className: 'threat' })));
+    this.coinBox = $('.coins', this.el);
+    this.floatEls = Array.from({ length: 8 }, () => {
+      const el = $('.floaters', this.el).appendChild(Object.assign(document.createElement('div'), { className: 'floater' }));
+      el.style.opacity = 0;
+      return { el, at: new THREE.Vector3(), t: 0, life: 0 };
+    });
+    this.floatI = 0;
     this.panel = $('#panel');
     this.hurtT = 0;
     this.last = {};
     this.selectedWeapon = 'rifle';
     this.tutorialSeen = false;
     try { this.tutorialSeen = localStorage.getItem('block-zombies:tutorial-seen-v2') === '1'; } catch { /* Private browsing can disable storage. */ }
-    this.lastCoinSerial = -1;
-    this.coinPulseT = 0;
     this.hp.innerHTML = '<span></span>'.repeat(TUNE.hearts);
     this.ammoMax.innerHTML = `<b>${TUNE.mag}</b>/${TUNE.mag}`;
     this.ammo = $('.ammo b', this.el);
@@ -60,16 +68,7 @@ export class Hud {
     this.set('notice', notice, (v) => { if (this.notice) { this.notice.textContent = v; this.notice.hidden = !v; } });
     const wallet = this.profile?.coins ?? round.bank ?? 0;
     this.set('wallet', wallet, (v) => { if (this.coins) this.coins.textContent = v; });
-    const pulse = round.coinPulse;
-    if (pulse && pulse.serial !== this.lastCoinSerial) {
-      this.lastCoinSerial = pulse.serial;
-      if (this.coinPulse) {
-        this.coinPulse.textContent = `+${pulse.amount}`;
-        this.coinPulse.classList.remove('show');
-        void this.coinPulse.offsetWidth;
-        this.coinPulse.classList.add('show');
-      }
-    }
+    this.set('gun', `${round.weapon?.id}:${round.weapon?.level}`, () => { if (this.gunTag) this.gunTag.innerHTML = gunIcon(round.weapon.id, round.weapon.level); });
     this.set('ammoMax', round.weapon?.mag ?? TUNE.mag, (v) => (this.ammoMax.lastChild.textContent = `/${v}`));
     this.set('ammo', round.ammo, (v) => (this.ammo.textContent = Math.max(0, v)));
     this.set('reload', round.reloadT > 0, (v) => (this.reload.hidden = !v));
@@ -92,6 +91,36 @@ export class Hud {
   }
 
   hurt() { this.hurtT = 0.45; }
+
+  /** Reward text that rises from a point in the world. */
+  floater(text, at, big = false) {
+    const f = this.floatEls[this.floatI++ % this.floatEls.length];
+    f.el.textContent = text;
+    f.el.classList.toggle('big', big);
+    f.at.copy(at);
+    f.at.y = Math.max(f.at.y, 0.9) + 0.5;
+    f.t = 0;
+    f.life = big ? 1.5 : 1.0;
+    if (this.coinBox) {
+      this.coinBox.classList.remove('bump');
+      void this.coinBox.offsetWidth;
+      this.coinBox.classList.add('bump');
+    }
+  }
+
+  floaters(camera, W, H, dt) {
+    for (const f of this.floatEls) {
+      if (f.life <= 0) continue;
+      f.t += dt;
+      if (f.t >= f.life) { f.life = 0; f.el.style.opacity = 0; continue; }
+      const k = f.t / f.life;
+      const p = _p.copy(f.at).setY(f.at.y + (1 - (1 - k) ** 2) * 0.9).project(camera);
+      if (p.z > 1) { f.el.style.opacity = 0; continue; }
+      const pop = k < 0.12 ? 0.6 + (k / 0.12) * 0.6 : 1.2 - Math.min(1, (k - 0.12) / 0.2) * 0.2;
+      f.el.style.opacity = k > 0.7 ? ((1 - k) / 0.3).toFixed(2) : 1;
+      f.el.style.transform = `translate(${((p.x * 0.5 + 0.5) * W).toFixed(1)}px, ${((-p.y * 0.5 + 0.5) * H).toFixed(1)}px) translate(-50%, -50%) scale(${pop.toFixed(2)})`;
+    }
+  }
 
   /** Edge arrows for nearby zombies outside the view. a: 0 ahead, + right. */
   threats(list, W, H) {
@@ -143,7 +172,7 @@ export class Hud {
       const shotgunLocked = weapon.id === 'shotgun' && !owned && (this.profile.completedDay ?? 0) < 2;
       const remaining = Math.max(0, price - this.profile.coins);
       return `<article class="weapon-product">
-        <h2>${weapon.name} <span class="weapon-level">Lv.${level}</span></h2><p>${weapon.description}</p>
+        <div class="weapon-head"><h2>${weapon.name} <span class="weapon-level">Lv.${level}</span></h2>${gunIcon(weapon.id, level)}</div><p>${weapon.description}</p>
         <p class="weapon-stats">${stats(current)}</p>
         ${owned ? next ? `<p class="weapon-next">Lv.${level + 1}：${stats(next)}</p>
           <button class="shop-upgrade" type="button" data-weapon="${weapon.id}" data-level="${level}" ${this.profile.coins < upgradePrice ? 'disabled' : ''}>升级 Lv.${level + 1} · ${upgradePrice} 金币${this.profile.coins < upgradePrice ? `（还差 ${upgradePrice - this.profile.coins}）` : ''}</button>` : '<p class="weapon-next">已满级 · 永久保留</p>' : ''}
