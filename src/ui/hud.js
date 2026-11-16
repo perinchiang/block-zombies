@@ -1,6 +1,7 @@
 import { TUNE } from '../game/round.js';
 import { WEAPONS, buildWeapon, UPGRADE_COSTS } from '../game/weapons.js';
 import { SHOP_PRICES } from '../game/profile.js';
+import { gunIcon } from '../actor/guns.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -16,6 +17,7 @@ export class Hud {
     this.ammo = $('.ammo b', this.el);
     this.ammoMax = $('.ammo', this.el);
     this.reload = $('.reload', this.el);
+    this.gunTag = $('.gun-tag', this.el);
     this.cross = $('.cross', this.el);
     this.hurtEl = $('#hurt');
     this.pauseButton = $('.pause', this.el);
@@ -70,6 +72,7 @@ export class Hud {
         this.coinPulse.classList.add('show');
       }
     }
+    this.set('gun', `${round.weapon?.id}:${round.weapon?.level}`, () => { if (this.gunTag) this.gunTag.innerHTML = gunIcon(round.weapon.id, round.weapon.level); });
     this.set('ammoMax', round.weapon?.mag ?? TUNE.mag, (v) => (this.ammoMax.lastChild.textContent = `/${v}`));
     this.set('ammo', round.ammo, (v) => (this.ammo.textContent = Math.max(0, v)));
     this.set('reload', round.reloadT > 0, (v) => (this.reload.hidden = !v));
@@ -143,7 +146,7 @@ export class Hud {
       const shotgunLocked = weapon.id === 'shotgun' && !owned && (this.profile.completedDay ?? 0) < 2;
       const remaining = Math.max(0, price - this.profile.coins);
       return `<article class="weapon-product">
-        <h2>${weapon.name} <span class="weapon-level">Lv.${level}</span></h2><p>${weapon.description}</p>
+        <div class="weapon-head"><h2>${weapon.name} <span class="weapon-level">Lv.${level}</span></h2>${gunIcon(weapon.id, level)}</div><p>${weapon.description}</p>
         <p class="weapon-stats">${stats(current)}</p>
         ${owned ? next ? `<p class="weapon-next">Lv.${level + 1}：${stats(next)}</p>
           <button class="shop-upgrade" type="button" data-weapon="${weapon.id}" data-level="${level}" ${this.profile.coins < upgradePrice ? 'disabled' : ''}>升级 Lv.${level + 1} · ${upgradePrice} 金币${this.profile.coins < upgradePrice ? `（还差 ${upgradePrice - this.profile.coins}）` : ''}</button>` : '<p class="weapon-next">已满级 · 永久保留</p>' : ''}

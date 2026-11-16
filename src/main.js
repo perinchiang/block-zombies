@@ -18,6 +18,7 @@ import { Profile } from './game/profile.js';
 //   ?shade=flat     solid ink shadows instead of hatching (style comparison)
 //   ?cam=x,y,z   camera offset in hero space (right, up, back)
 //   ?fps            show a frame-time readout
+//   ?inspect=deg,dist,height  orbit the hero for model screenshots (0 = from the front)
 const params = new URLSearchParams(location.search);
 const still = params.has('still');
 const auto = params.has('auto');
@@ -280,8 +281,18 @@ function rigClearance(side) {
   return hit.blocked ? THREE.MathUtils.clamp((hit.distance - CAM_CLEAR) / reach, 0, 1) : 1;
 }
 
+const INSPECT = params.get('inspect')?.split(',').map(Number);
+
 function updateCamera(dt = 0) {
   const hp = round.hero.root.position;
+  if (INSPECT) {
+    const [deg = 0, dist = 2.6, height = 1.1] = INSPECT;
+    const a = round.yaw + THREE.MathUtils.degToRad(deg);
+    camera.position.set(hp.x + Math.sin(a) * dist, height, hp.z + Math.cos(a) * dist);
+    camera.lookAt(hp.x, 0.8, hp.z);
+    camera.updateMatrixWorld(true);
+    return;
+  }
   _f.set(Math.sin(round.yaw), 0, Math.cos(round.yaw));
   _r.set(-Math.cos(round.yaw), 0, Math.sin(round.yaw));
   round.scene.updateMatrixWorld(true);

@@ -37,6 +37,10 @@ html, body {
 .ammo { right: calc(82px + var(--safe-r)); font-size: 15px; padding: 0 10px; }
 .ammo b { font-size: 26px; font-variant-numeric: tabular-nums; }
 .reload { position: absolute; top: 56px; right: calc(82px + var(--safe-r)); font-size: 16px; padding: 0 8px; background: var(--ink); color: var(--paper); }
+.gun-icon { display: block; height: 100%; width: auto; overflow: visible; }
+.gun-tag { position: absolute; top: 54px; right: calc(82px + var(--safe-r)); height: 32px; padding: 4px 7px; background: var(--paper); border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink); transform: rotate(1.5deg); }
+.gun-tag:empty { display: none; }
+.reload { z-index: 1; }
 .cross { position: absolute; left: 0; top: 0; width: 26px; height: 26px; margin: -13px 0 0 -13px; }
 .cross::before, .cross::after { content: ""; position: absolute; background: var(--ink); box-shadow: 0 0 0 1.5px var(--paper); }
 .cross::before { left: 11px; top: 0; width: 4px; height: 26px; }
@@ -106,6 +110,8 @@ html, body {
 .shop-card .weapon-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
 .weapon-product { min-width: 0; padding: 10px; border: 3px solid var(--ink); box-shadow: 3px 3px 0 var(--ink); text-align: left; }
 .weapon-product h2 { margin: 0; font-size: 20px; }
+.weapon-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.weapon-head .gun-icon { flex: none; height: 44px; max-width: 48%; }
 .card .weapon-product p { margin-top: 4px; font-size: 12px; line-height: 1.4; }
 .card .weapon-product .weapon-price { font-weight: 900; }
 .shop-actions { display: flex; gap: 6px; margin-top: 8px; }
@@ -126,6 +132,7 @@ html, body {
   .coins { top: 50px; }
   .notice { top: 78px; }
   .ammo { right: 14px; }
+  .gun-tag { right: 14px; }
 }
 @media (max-width: 420px) {
   .shop-card { padding: 12px; }
@@ -166,6 +173,7 @@ html, body {
   .shop-card .weapon-choices { margin-top: 6px; }
   .weapon-product { padding: 6px 8px; }
   .weapon-product h2 { font-size: 17px; }
+  .weapon-head .gun-icon { height: 32px; }
   .weapon-product .weapon-choice { min-height: 44px; }
   .shop-card .btn { margin-top: 6px; font-size: 18px; }
 }
