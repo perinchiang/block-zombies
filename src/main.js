@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { COL } from './render/palette.js';
 import { LIGHT, TOON } from './render/toon.js';
 import { InkLine, NO_INK_LAYER } from './render/inkline.js';
+import { makeSky } from './render/sky.js';
 import { buildArena, BOUNDS } from './world/arena.js';
 import { resolvePosition } from './world/navigation.js';
 import { Round } from './game/round.js';
@@ -33,8 +34,9 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap; // banded by the toon pass into hard edges
 
 const scene = new THREE.Scene();
-scene.background = COL.paper.clone();
-scene.fog = new THREE.Fog(COL.paper, 16, 46);
+scene.background = COL.horizon.clone();
+// Haze takes the horizon colour, so the far skyline melts into the sky.
+scene.fog = new THREE.Fog(COL.horizon, 18, 72);
 scene.add(new THREE.AmbientLight(0xffffff, LIGHT.ambient));
 const sun = new THREE.DirectionalLight(0xffffff, LIGHT.sun);
 const SUN_OFF = new THREE.Vector3(-7, 12, 5);
@@ -91,6 +93,9 @@ const CAM_OFF = vec(params.get('cam'), new THREE.Vector3(1.15, 1.65, 5.2));
 const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 120);
 camera.layers.enable(NO_INK_LAYER);
 scene.add(camera);
+const sky = makeSky();
+sky.layers.set(NO_INK_LAYER);
+camera.add(sky);
 const ink = new InkLine(renderer);
 fx.camera = camera;
 const rotateEl = document.getElementById('rotate');
@@ -104,7 +109,8 @@ function resize() {
   renderer.setSize(W, H, false);
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
   ink.setSize(size.x, size.y, H < 500 ? 1.8 : 2.2);
-  TOON.hatch.value = 8 * dpr;
+  TOON.hatch.value = 5 * dpr;
+  sky.material.uniforms.uDot.value = 9 * dpr;
   camera.aspect = W / H;
   camera.fov = 50 + THREE.MathUtils.clamp((1.9 - camera.aspect) / 0.6, 0, 1) * 10;
   camera.updateProjectionMatrix();
