@@ -31,6 +31,13 @@ const FRAG = /* glsl */ `
     // Thinner lines with distance. Pen pressure varies only gently: strong
     // jitter broke short edges on small parts into scribble.
     float w = uLine * clamp(8.0 / z, 0.45, 1.0) * (0.92 + 0.16 * hash(floor(vUv * vec2(12.0, 7.0))));
+    // Normal alpha carries per-mesh ink width. Include neighbours so the
+    // outside half of a small weapon's silhouette is also drawn finely.
+    vec2 probe = uTexel * w;
+    float weight = texture2D(tNormal, vUv).a;
+    weight = min(weight, min(texture2D(tNormal, vUv + vec2(probe.x, 0.0)).a, texture2D(tNormal, vUv - vec2(probe.x, 0.0)).a));
+    weight = min(weight, min(texture2D(tNormal, vUv + vec2(0.0, probe.y)).a, texture2D(tNormal, vUv - vec2(0.0, probe.y)).a));
+    w *= weight;
     vec2 dx = vec2(uTexel.x * w, 0.0), dy = vec2(0.0, uTexel.y * w);
 
     float l = invZ(vUv - dx), r = invZ(vUv + dx), u = invZ(vUv + dy), d = invZ(vUv - dy);
@@ -57,6 +64,13 @@ const FRAG = /* glsl */ `
 /** Objects on this layer are drawn in colour only: no outline, no crease lines. */
 export const NO_INK_LAYER = 1;
 
+/** Store width on geometry so the shared normal pass needs no extra draw pass. */
+export function setInkWeight(geometry, weight) {
+  geometry.setAttribute('inkWeight', new THREE.Float32BufferAttribute(
+    new Float32Array(geometry.attributes.position.count).fill(weight), 1));
+  return geometry;
+}
+
 export class InkLine {
   constructor(renderer) {
     this.renderer = renderer;
@@ -64,6 +78,13 @@ export class InkLine {
     this.color = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthTexture: this.depth });
     this.normal = new THREE.WebGLRenderTarget(1, 1);
     this.normalMat = new THREE.MeshNormalMaterial();
+    this.normalMat.defaultAttributeValues = { inkWeight: [1] };
+    this.normalMat.onBeforeCompile = (shader) => {
+      shader.vertexShader = 'attribute float inkWeight; varying float vInkWeight;\n' +
+        shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvInkWeight = inkWeight;');
+      shader.fragmentShader = 'varying float vInkWeight;\n' +
+        shader.fragmentShader.replace(/}\s*$/, 'gl_FragColor.a = vInkWeight;\n}');
+    };
     this.quad = new THREE.Mesh(
       new THREE.PlaneGeometry(2, 2),
       new THREE.ShaderMaterial({

@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import { toon } from '../render/toon.js';
 import { COL, ZOMBIE_CLOTHES } from '../render/palette.js';
-import { packTex } from '../render/textures.js';
-import { heroFace, zombieFace, zombieShirt, heroJacket } from './faces.js';
+import { heroFace, heroHairFace, heroJacketBack, zombieFace, zombieShirt, heroJacket } from './faces.js';
 import { buildGun, GUN_SCALE } from './guns.js';
 
 // Big-headed block figure. Limbs are rigid boxes that swing from a pivot:
@@ -13,7 +12,7 @@ const GEO = {
   torso: box(0.46, 0.5, 0.28),
   arm: box(0.15, 0.46, 0.16),
   headZ: box(0.48, 0.48, 0.48),
-  headH: box(0.5, 0.5, 0.5),
+  headH: box(0.62, 0.62, 0.62),
 };
 export const ZOMBIE_VARIANTS = 8;
 
@@ -35,6 +34,7 @@ function looks(kind, variant) {
   cache.set(key, m);
   return m;
 }
+const UP = new THREE.Vector3(0, 1, 0);
 const FLASH = toon(COL.paper, { mid: 1 });
 
 function part(geo, mat, y = 0) {
@@ -65,46 +65,66 @@ export class BlockMan {
     // The model faces +Z, so its own left side is +X.
     this.legL = new THREE.Group(); this.legL.position.set(0.11, 0.42, 0);
     this.legR = new THREE.Group(); this.legR.position.set(-0.11, 0.42, 0);
-    this.legL.add(part(GEO.leg, M.pants, -0.21));
-    this.legR.add(part(GEO.leg, M.pants, -0.21));
+    for (const leg of [this.legL, this.legR]) {
+      leg.add(part(zombie ? GEO.leg : box(0.19, 0.31, 0.22), M.pants, zombie ? -0.21 : -0.155));
+      if (!zombie) {
+        const boot = part(box(0.205, 0.13, 0.29), toon(COL.gunDark), -0.355);
+        boot.position.z = 0.025;
+        leg.add(boot);
+      }
+    }
     this.body.add(this.legL, this.legR);
 
     this.torso = new THREE.Group(); this.torso.position.y = 0.42;
-    this.torso.add(part(GEO.torso, faced(M.cloth, M.chest), 0.25));
+    const jacket = faced(M.cloth, M.chest);
+    if (!zombie) jacket[5] = toon(0xffffff, { map: heroJacketBack() });
+    this.torso.add(part(GEO.torso, jacket, 0.25));
     this.body.add(this.torso);
 
     this.head = new THREE.Group(); this.head.position.y = 0.5;
-    const hs = zombie ? 0.48 : 0.5;
-    this.head.add(part(zombie ? GEO.headZ : GEO.headH, faced(M.skin, M.face), hs / 2));
+    const hs = zombie ? 0.48 : 0.62;
+    const headMaterials = faced(M.skin, M.face);
     if (!zombie) {
-      const cap = part(box(hs * 1.06, hs * 0.22, hs * 1.06), M.hair, hs + 0.02);
-      const back = part(box(hs * 1.06, hs * 0.86, hs * 0.18), M.hair, hs * 0.57);
-      back.position.z = -hs * 0.46;
-      // Paper headband, knotted at the back: the mark you follow from behind.
-      const cloth = toon(COL.paper, { mid: 0.86 });
-      const band = part(box(hs * 1.1, hs * 0.16, hs * 1.1), cloth, hs * 0.74);
-      this.head.add(cap, back, band);
+      headMaterials[0] = toon(0xffffff, { map: heroHairFace(true, false) });
+      headMaterials[1] = toon(0xffffff, { map: heroHairFace(true, true) });
+      headMaterials[2] = M.hair;
+      headMaterials[5] = toon(0xffffff, { map: heroHairFace() });
+    }
+    this.head.add(part(zombie ? GEO.headZ : GEO.headH, headMaterials, hs / 2));
+    if (!zombie) {
+      const cap = part(box(0.65, 0.12, 0.65), M.hair, 0.61);
+      cap.name = 'hair-cap';
+      // The band stands 3 cm beyond the head on every side; no rear hair shell.
+      const band = part(box(0.68, 0.085, 0.68), toon(COL.paper, { mid: 0.92 }), 0.455);
+      band.name = 'headband';
+      this.head.add(cap, band);
     }
     this.torso.add(this.head);
 
     // arms pivot at the shoulder; rotation.x < 0 raises them forward
     this.armL = new THREE.Group(); this.armL.position.set(0.31, 0.46, 0);
     this.armR = new THREE.Group(); this.armR.position.set(-0.31, 0.46, 0);
-    const sleeve = zombie ? M.skin : M.cloth;
-    this.armL.add(part(GEO.arm, sleeve, -0.2));
-    this.armR.add(part(GEO.arm, sleeve, -0.2));
-    this.torso.add(this.armL, this.armR);
-
-    if (!zombie) {
-      // Backpack and bedroll: most of the game is spent looking at this side.
-      // Two big shapes only; flap, straps and pocket are drawn on the pack so
-      // the ink pass does not outline a cluster of tiny boxes.
-      const leather = toon(COL.pack, { mid: 0.84 });
-      const packBack = toon(0xffffff, { map: packTex(), mid: 0.84 });
-      const pack = part(box(0.32, 0.34, 0.16), [leather, leather, leather, leather, leather, packBack], 0.26); pack.position.z = -0.21;
-      const roll = part(new THREE.CylinderGeometry(0.07, 0.07, 0.42, 12), toon(COL.blind, { mid: 0.86 }), 0.5);
-      roll.rotation.z = Math.PI / 2; roll.position.z = -0.2;
-      this.torso.add(pack, roll);
+    if (zombie) {
+      this.armL.add(part(GEO.arm, M.skin, -0.2));
+      this.armR.add(part(GEO.arm, M.skin, -0.2));
+      this.torso.add(this.armL, this.armR);
+    } else {
+      // Two rigid, authored segments per arm. Hands belong to the weapon;
+      // sleeves bridge shoulder -> elbow -> wrist, without skinning or an IK solver.
+      this.armL.position.set(0, 0, 0); this.armR.position.set(0, 0, 0);
+      for (const arm of [this.armL, this.armR]) {
+        arm.add(part(box(0.15, 1, 0.15), M.cloth));
+        arm.add(part(box(0.135, 1, 0.135), M.cloth));
+      }
+      this.body.add(this.armL, this.armR);
+      this.weaponRig = new THREE.Group();
+      this.weaponRig.position.set(0, 0.85, 0);
+      this.body.add(this.weaponRig);
+      this.armMatrix = new THREE.Matrix4();
+      this.shoulderPoint = new THREE.Vector3();
+      this.elbowPoint = new THREE.Vector3();
+      this.wristPoint = new THREE.Vector3();
+      this.segmentDirection = new THREE.Vector3();
 
       this.gun = new THREE.Group();
       this.weaponBands = [];
@@ -119,14 +139,19 @@ export class BlockMan {
       this.rifle = this.guns.rifle;
       this.shotgun = this.guns.shotgun;
       this.gun.scale.setScalar(GUN_SCALE);
-      // Carried on the outside of the forearm so it is not hidden behind the arm
-      // from the shoulder camera.
-      this.gun.position.set(-0.1, -0.44, 0.13);
-      this.gun.rotation.set(Math.PI / 2 - 0.37, 0, 0); // level the barrel despite the lowered arm
-      this.armR.add(this.gun);
+      // Leave room for the wider headband and level-four weapon rings even
+      // when the barrel is raised past the cheek.
+      this.gun.position.set(-0.51, -0.015, 0.3);
+      this.weaponRig.add(this.gun);
+      const glove = toon(COL.gunmetal, { mid: 0.95 });
+      this.handR = part(box(0.125, 0.135, 0.14), glove);
+      this.handL = part(box(0.14, 0.12, 0.15), glove);
+      this.handR.name = 'grip-hand'; this.handL.name = 'support-hand';
+      this.gun.add(this.handR, this.handL);
       this.muzzle = new THREE.Object3D();
       this.muzzle.position.set(0, 0.02, this.rifle.userData.muzzle);
       this.gun.add(this.muzzle);
+      this.setWeapon('rifle');
     }
 
     this.meshes = [];
@@ -142,7 +167,35 @@ export class BlockMan {
     this.weaponId = id;
     const shown = Object.hasOwn(this.guns, id) ? id : 'rifle';
     for (const [key, gun] of Object.entries(this.guns)) gun.visible = key === shown;
-    this.muzzle.position.z = this.guns[shown].userData.muzzle;
+    const spec = this.guns[shown].userData;
+    this.muzzle.position.set(0, 0.02, spec.muzzle);
+    this.handR.position.fromArray(spec.grip);
+    this.handL.position.fromArray(spec.support);
+  }
+
+  poseArms() {
+    this.torso.updateMatrix();
+    this.weaponRig.updateMatrix();
+    this.gun.updateMatrix();
+    this.armMatrix.multiplyMatrices(this.weaponRig.matrix, this.gun.matrix);
+    for (const [arm, hand, side] of [[this.armL, this.handL, 1], [this.armR, this.handR, -1]]) {
+      const shoulder = this.shoulderPoint.set(side * 0.275, 0.43, 0).applyMatrix4(this.torso.matrix);
+      const wrist = this.wristPoint.copy(hand.position).applyMatrix4(this.armMatrix);
+      const elbow = this.elbowPoint.copy(shoulder).lerp(wrist, 0.46);
+      elbow.x += side * 0.11;
+      elbow.y -= 0.13;
+      elbow.z -= 0.04;
+      this.poseSegment(arm.children[0], shoulder, elbow);
+      this.poseSegment(arm.children[1], elbow, wrist);
+    }
+  }
+
+  poseSegment(mesh, from, to) {
+    const direction = this.segmentDirection.subVectors(to, from);
+    const length = direction.length();
+    mesh.position.copy(from).add(to).multiplyScalar(0.5);
+    mesh.scale.y = length;
+    mesh.quaternion.setFromUnitVectors(UP, direction.divideScalar(length));
   }
 
   setWeaponLevel(level) {
@@ -199,13 +252,13 @@ export class BlockMan {
       this.legL.rotation.x = s * 0.7;
       this.legR.rotation.x = -s * 0.7;
       this.recoil = Math.max(0, this.recoil - dt * (this.weaponId === 'shotgun' ? 5 : 12));
-      // shouldered rifle: right arm points forward, left arm braces the barrel
-      this.armR.rotation.set(-1.2 - this.recoil * 0.25, 0, 0.16);
-      this.armL.rotation.set(-1.0 - this.recoil * 0.2, 0, -0.85);
-      this.gun.position.z = 0.13 - this.recoil * 0.07;
-      this.torso.rotation.y = -0.12;
-      this.torso.rotation.x = -(this.aimPitch ?? 0) - this.recoil * 0.04;
-      this.head.rotation.y = 0.12;
+      const pitch = this.aimPitch ?? 0;
+      this.torso.rotation.set(-pitch * 0.18 - this.recoil * 0.025, -0.07, 0);
+      this.head.rotation.set(-pitch * 0.22, 0.07, 0);
+      // The weapon takes the aim angle; the torso only follows a little.
+      this.weaponRig.rotation.x = -pitch - this.recoil * 0.1;
+      this.gun.position.z = 0.3 - this.recoil * 0.065;
+      this.poseArms();
       this.body.position.y = Math.abs(Math.cos(p)) * 0.06 * walk + Math.sin(t * 2) * 0.008;
     }
   }
