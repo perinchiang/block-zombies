@@ -1,13 +1,14 @@
 import * as THREE from 'three';
 import { toon } from '../render/toon.js';
 import { COL, HEX } from '../render/palette.js';
+import { setInkWeight } from '../render/inkline.js';
 
 // Hand-built block guns. Each one is designed to be told apart from behind the
 // hero at phone size: by outline first (long and thin, short and fat), then by
 // material (cold metal, warm wood). Barrels point along +Z.
 const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
 function piece(mat, w, h, d, x = 0, y = 0, z = 0, tilt = 0) {
-  const m = new THREE.Mesh(box(w, h, d), mat);
+  const m = new THREE.Mesh(setInkWeight(box(w, h, d), 0.5), mat);
   m.position.set(x, y, z);
   m.rotation.x = tilt;
   m.castShadow = true;
@@ -18,10 +19,10 @@ function piece(mat, w, h, d, x = 0, y = 0, z = 0, tilt = 0) {
 let mats;
 function materials() {
   return (mats ??= {
-    body: toon(COL.gunmetal, { mid: 0.85, shadeInk: 0.25 }),
+    body: toon(COL.gunmetal, { mid: 0.95, shadeInk: 0.04 }),
     steel: toon(COL.steel, { mid: 0.8 }),
     wood: toon(COL.wood, { mid: 0.8 }),
-    dark: toon(COL.gunDark, { mid: 0.82, shadeInk: 0.3 }),
+    dark: toon(COL.gunDark, { mid: 0.9, shadeInk: 0.06 }),
     mark: toon(COL.hero),
   });
 }
@@ -29,37 +30,35 @@ function materials() {
 // Part rows: material, width, height, depth, x, y, z, tilt about X.
 // The same rows build the 3D model and the flat side-view icon.
 const SPECS = {
-  /** Long, thin, cold: receiver, slim barrel with a brake, raked magazine, open stock. */
+  // Broad light handguard and barrel; a compact stock never hides the receiver.
   rifle: {
-    muzzle: 0.86, bands: [-0.14, 0.12], bandSize: 0.17,
+    muzzle: 0.755, grip: [0, -0.13, -0.12], support: [0, -0.11, 0.25],
+    bands: [-0.08, 0.1], bandSize: 0.215,
     parts: [
-      ['body', 0.06, 0.05, 0.28, 0, 0.03, -0.35],          // stock tube
-      ['dark', 0.08, 0.17, 0.05, 0, -0.02, -0.5],          // butt plate
-      ['dark', 0.06, 0.15, 0.08, 0, -0.13, -0.14, -0.25],  // grip
-      ['dark', 0.075, 0.26, 0.1, 0, -0.17, 0.1, 0.32],     // magazine, raked forward
-      ['steel', 0.045, 0.045, 0.26, 0, 0.02, 0.63],        // barrel
-      ['dark', 0.075, 0.075, 0.09, 0, 0.02, 0.79],         // muzzle brake
-      ['steel', 0.1, 0.1, 0.3, 0, 0.005, 0.36],            // handguard
-      ['body', 0.11, 0.14, 0.44, 0, 0, 0],                 // receiver
-      ['dark', 0.04, 0.035, 0.26, 0, 0.09, 0.02],          // top rail
-      ['mark', 0.03, 0.06, 0.03, 0, 0.1, 0.46],            // front sight
+      ['body', 0.12, 0.10, 0.21, 0, 0.015, -0.27],
+      ['dark', 0.14, 0.14, 0.035, 0, 0, -0.385],
+      ['dark', 0.085, 0.18, 0.10, 0, -0.13, -0.12, -0.12],
+      ['body', 0.11, 0.22, 0.12, 0, -0.17, 0.07, 0.24],
+      ['steel', 0.09, 0.09, 0.24, 0, 0.02, 0.59],
+      ['body', 0.12, 0.12, 0.06, 0, 0.02, 0.72],
+      ['steel', 0.17, 0.15, 0.3, 0, 0.005, 0.32],
+      ['body', 0.18, 0.19, 0.36, 0, 0, 0],
+      ['mark', 0.09, 0.035, 0.16, 0, 0.113, 0.02],
     ],
   },
-  /** Short, fat, warm: twin barrels over a wooden pump, heavy dropped stock, shells on the side. */
+  // Wide twin barrels and a single warm wooden pump: no tiny shell clutter.
   shotgun: {
-    muzzle: 0.66, bands: [-0.11, 0.07], bandSize: 0.21,
+    muzzle: 0.63, grip: [0, -0.13, -0.10], support: [0, -0.135, 0.25],
+    bands: [-0.09, 0.09], bandSize: 0.245,
     parts: [
-      ['wood', 0.13, 0.17, 0.32, 0, -0.035, -0.29, 0.12],  // stock, dropped
-      ['dark', 0.14, 0.19, 0.04, 0, -0.055, -0.46, 0.12],  // butt pad
-      ['dark', 0.06, 0.13, 0.07, 0, -0.14, -0.08, -0.25],  // grip
-      ['steel', 0.075, 0.075, 0.5, 0.042, 0.035, 0.39],    // barrels, side by side
-      ['steel', 0.075, 0.075, 0.5, -0.042, 0.035, 0.39],
-      ['dark', 0.17, 0.035, 0.03, 0, 0.035, 0.635],        // muzzle band
-      ['wood', 0.2, 0.12, 0.24, 0, -0.065, 0.32],          // pump
-      ['body', 0.15, 0.17, 0.3, 0, 0, 0],                  // receiver
-      ['mark', 0.035, 0.05, 0.05, -0.092, 0.02, -0.08],    // spare shells
-      ['mark', 0.035, 0.05, 0.05, -0.092, 0.02, -0.005],
-      ['mark', 0.035, 0.05, 0.05, -0.092, 0.02, 0.07],
+      ['wood', 0.16, 0.16, 0.25, 0, -0.025, -0.245, 0.08],
+      ['dark', 0.175, 0.18, 0.035, 0, -0.035, -0.38, 0.08],
+      ['dark', 0.09, 0.17, 0.1, 0, -0.13, -0.1, -0.12],
+      ['steel', 0.105, 0.105, 0.46, 0.06, 0.035, 0.39],
+      ['steel', 0.105, 0.105, 0.46, -0.06, 0.035, 0.39],
+      ['body', 0.24, 0.15, 0.045, 0, 0.025, 0.6],
+      ['wood', 0.23, 0.16, 0.26, 0, -0.065, 0.28],
+      ['body', 0.21, 0.2, 0.3, 0, 0, 0],
     ],
   },
 };
@@ -83,6 +82,8 @@ export function buildGun(id, bands = []) {
     bands.push({ mesh: band, level });
   }
   g.userData.muzzle = spec.muzzle;
+  g.userData.grip = spec.grip;
+  g.userData.support = spec.support;
   return g;
 }
 

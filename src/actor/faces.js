@@ -27,12 +27,14 @@ export function heroFace() {
     g.fillRect(0, 0, s, s);
     ink(g);
     // fringe
+    g.fillStyle = HEX.hair;
     g.beginPath();
     g.moveTo(0, 0); g.lineTo(s, 0); g.lineTo(s, s * 0.3);
     g.lineTo(s * 0.78, s * 0.22); g.lineTo(s * 0.62, s * 0.34); g.lineTo(s * 0.46, s * 0.2);
     g.lineTo(s * 0.26, s * 0.32); g.lineTo(s * 0.12, s * 0.2); g.lineTo(0, s * 0.3);
     g.closePath(); g.fill();
     // brows + eyes: determined, slightly narrowed
+    ink(g);
     g.lineWidth = s * 0.05;
     g.beginPath(); g.moveTo(s * 0.2, s * 0.43); g.lineTo(s * 0.4, s * 0.47); g.stroke();
     g.beginPath(); g.moveTo(s * 0.8, s * 0.43); g.lineTo(s * 0.6, s * 0.47); g.stroke();
@@ -42,6 +44,37 @@ export function heroFace() {
     g.lineWidth = s * 0.04;
     g.beginPath(); g.moveTo(s * 0.42, s * 0.8); g.lineTo(s * 0.6, s * 0.78); g.stroke();
   });
+}
+
+/** Hair is painted on the head itself: no overlapping rear/side shells. */
+export function heroHairFace(side = false, mirror = false) {
+  return canvasTex((g, s) => {
+    g.fillStyle = HEX.skin; g.fillRect(0, 0, s, s);
+    if (mirror) { g.translate(s, 0); g.scale(-1, 1); }
+    g.fillStyle = HEX.hair;
+    if (side) {
+      g.beginPath(); g.moveTo(0, 0); g.lineTo(s, 0);
+      g.lineTo(s, s * 0.3); g.lineTo(s * 0.76, s * 0.3);
+      g.lineTo(s * 0.69, s * 0.62); g.lineTo(s * 0.54, s * 0.62);
+      g.lineTo(s * 0.5, s * 0.84); g.lineTo(0, s * 0.84);
+      g.closePath(); g.fill();
+    } else {
+      g.fillRect(0, 0, s, s * 0.84);
+      // One broad notch, readable from the actual play camera.
+      g.fillRect(s * 0.34, s * 0.8, s * 0.32, s * 0.08);
+    }
+  });
+}
+
+export function heroJacketBack() {
+  return canvasTex((g, s) => {
+    g.fillStyle = HEX.hero; g.fillRect(0, 0, s, s);
+    g.fillStyle = HEX.heroDark; g.fillRect(0, s * 0.9, s, s * 0.1);
+    // Small cloth badge, not another outlined box on the back.
+    g.fillStyle = HEX.paper; g.fillRect(s * 0.35, s * 0.22, s * 0.3, s * 0.19);
+    g.fillStyle = HEX.hair;
+    g.fillRect(s * 0.42, s * 0.29, s * 0.16, s * 0.05);
+  }, 64);
 }
 
 export function zombieFace(seed = 0) {

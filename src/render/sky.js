@@ -23,8 +23,8 @@ const FRAG = /* glsl */ `
     // azimuth / elevation grid, uDot cells per radian, turned 45 degrees
     vec2 a = vec2(atan(d.x, d.z), asin(clamp(d.y, -1.0, 1.0))) * uDot;
     vec2 p = mat2(0.7071, -0.7071, 0.7071, 0.7071) * a;
-    float d = length(fract(p) - 0.5);
-    return 1.0 - smoothstep(amount - 0.04, amount + 0.02, d);
+    float radius = length(fract(p) - 0.5);
+    return 1.0 - smoothstep(amount - 0.04, amount + 0.02, radius);
   }
   void main() {
     vec3 dir = normalize(vDir);
