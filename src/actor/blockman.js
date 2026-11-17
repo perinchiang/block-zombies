@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { toon } from '../render/toon.js';
-import { COL } from '../render/palette.js';
+import { COL, ZOMBIE_CLOTHES } from '../render/palette.js';
+import { packTex } from '../render/textures.js';
 import { heroFace, zombieFace, zombieShirt, heroJacket } from './faces.js';
 import { buildGun, GUN_SCALE } from './guns.js';
 
@@ -22,13 +23,17 @@ function looks(kind, variant) {
   const key = `${kind}:${variant}`;
   if (cache.has(key)) return cache.get(key);
   const zombie = kind === 'zombie';
+  // Characters get clean colour shadows, no halftone: dots on small moving
+  // boxes read as noise, and the figures should be the cleanest thing on screen.
+  const [shirt, trousers] = zombie ? ZOMBIE_CLOTHES[variant % ZOMBIE_CLOTHES.length] : [COL.hero, COL.heroDark];
+  const plain = { hatch: false };
   const m = {
-    skin: toon(zombie ? COL.zombie : COL.skin, { hatch: false }),
-    cloth: toon(zombie ? COL.zombieCloth : COL.hero),
-    pants: toon(zombie ? COL.rust : COL.heroDark, { shadeInk: 0.35 }),
+    skin: toon(zombie ? COL.zombie : COL.skin, plain),
+    cloth: toon(shirt, plain),
+    pants: toon(trousers, { hatch: false, shadeInk: 0.1 }),
     hair: toon(zombie ? COL.ink : COL.hair, { hatch: false, mid: 0.85 }),
     face: toon(0xffffff, { map: zombie ? zombieFace(variant) : heroFace(), hatch: false }),
-    chest: toon(0xffffff, { map: zombie ? zombieShirt(variant) : heroJacket() }),
+    chest: toon(0xffffff, { map: zombie ? zombieShirt(variant, shirt) : heroJacket(), hatch: false }),
   };
   cache.set(key, m);
   return m;
@@ -81,8 +86,7 @@ export class BlockMan {
       // Paper headband, knotted at the back: the mark you follow from behind.
       const cloth = toon(COL.paper, { hatch: false, mid: 0.86 });
       const band = part(box(hs * 1.1, hs * 0.16, hs * 1.1), cloth, hs * 0.74);
-      const knot = part(box(0.13, 0.11, 0.06), cloth, hs * 0.72); knot.position.z = -hs * 0.6;
-      this.head.add(cap, back, band, knot);
+      this.head.add(cap, back, band);
     }
     this.torso.add(this.head);
 
@@ -96,12 +100,14 @@ export class BlockMan {
 
     if (!zombie) {
       // Backpack and bedroll: most of the game is spent looking at this side.
-      const canvas = toon(COL.pack, { mid: 0.82 });
-      const pack = part(box(0.36, 0.36, 0.17), canvas, 0.27); pack.position.z = -0.22;
-      const flap = part(box(0.37, 0.1, 0.18), toon(COL.heroDark, { hatch: false }), 0.4); flap.position.z = -0.225;
-      const roll = part(box(0.44, 0.12, 0.13), toon(COL.paperShade, { hatch: false, mid: 0.86 }), 0.53); roll.position.z = -0.2;
-      const pocket = part(box(0.2, 0.13, 0.04), canvas, 0.2); pocket.position.z = -0.32;
-      this.torso.add(pack, flap, roll, pocket);
+      // Two big shapes only; flap, straps and pocket are drawn on the pack so
+      // the ink pass does not outline a cluster of tiny boxes.
+      const leather = toon(COL.pack, { hatch: false, mid: 0.84 });
+      const packBack = toon(0xffffff, { map: packTex(), hatch: false, mid: 0.84 });
+      const pack = part(box(0.32, 0.34, 0.16), [leather, leather, leather, leather, leather, packBack], 0.26); pack.position.z = -0.21;
+      const roll = part(new THREE.CylinderGeometry(0.07, 0.07, 0.42, 12), toon(COL.blind, { hatch: false, mid: 0.86 }), 0.5);
+      roll.rotation.z = Math.PI / 2; roll.position.z = -0.2;
+      this.torso.add(pack, roll);
 
       this.gun = new THREE.Group();
       this.weaponBands = [];

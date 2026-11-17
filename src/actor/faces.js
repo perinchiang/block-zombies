@@ -74,9 +74,9 @@ export function zombieFace(seed = 0) {
 }
 
 /** Torn shirt front with a blood mark, for zombie torsos. */
-export function zombieShirt(seed = 0) {
+export function zombieShirt(seed = 0, cloth = HEX.zombieCloth) {
   return canvasTex((g, s) => {
-    g.fillStyle = HEX.zombieCloth;
+    g.fillStyle = cloth;
     g.fillRect(0, 0, s, s);
     ink(g);
     const r = (i) => { const x = Math.sin((seed + 3) * 51.3 + i * 7.1) * 43758.5; return x - Math.floor(x); };

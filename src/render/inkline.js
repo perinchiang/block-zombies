@@ -28,8 +28,9 @@ const FRAG = /* glsl */ `
     vec3 col = texture2D(tColor, vUv).rgb;
     float iz = invZ(vUv);
     float z = 1.0 / max(iz, 1e-5);
-    // Slightly uneven pen pressure, thinner lines with distance.
-    float w = uLine * clamp(8.0 / z, 0.45, 1.0) * (0.8 + 0.4 * hash(floor(vUv * vec2(48.0, 27.0))));
+    // Thinner lines with distance. Pen pressure varies only gently: strong
+    // jitter broke short edges on small parts into scribble.
+    float w = uLine * clamp(8.0 / z, 0.45, 1.0) * (0.92 + 0.16 * hash(floor(vUv * vec2(12.0, 7.0))));
     vec2 dx = vec2(uTexel.x * w, 0.0), dy = vec2(0.0, uTexel.y * w);
 
     float l = invZ(vUv - dx), r = invZ(vUv + dx), u = invZ(vUv + dy), d = invZ(vUv - dy);
@@ -45,9 +46,9 @@ const FRAG = /* glsl */ `
     col = mix(col, uInk, edge);
 
     // Paper tooth and a soft vignette.
-    col *= 0.97 + 0.045 * hash(floor(gl_FragCoord.xy * 0.5));
+    col *= 0.975 + 0.035 * hash(floor(gl_FragCoord.xy * 0.5));
     vec2 q = vUv - 0.5;
-    col *= 1.0 - 0.18 * dot(q, q);
+    col *= 1.0 - 0.22 * dot(q, q);
     gl_FragColor = vec4(col, 1.0);
     #include <colorspace_fragment>
   }
