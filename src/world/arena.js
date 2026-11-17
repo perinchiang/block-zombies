@@ -4,7 +4,7 @@ import { COL, HEX } from '../render/palette.js';
 import { NO_INK_LAYER } from '../render/inkline.js';
 import {
   asphaltTex, paverTex, plazaTex, stuccoTex, concreteTex, windowTex, signTex,
-  stripeTex, hazardTex, worldUV, planeUV,
+  stripeTex, hazardTex, doorTex, worldUV, planeUV,
 } from '../render/textures.js';
 
 function mesh(geo, mat, x, y, z, { ry = 0, shadow = true } = {}) {
@@ -35,17 +35,17 @@ export function buildArena(scene) {
   const colliders = [];
   const T = (color, map, opts) => toon(color, { map, ...opts });
   const M = {
-    pavers: T(0xffffff, paverTex(), { hatch: true }),
+    pavers: T(0xffffff, paverTex()),
     road: T(0xffffff, asphaltTex()),
     plaza: T(0xffffff, plazaTex()),
-    lane: toon(COL.lane, { hatch: false }),
-    hazard: T(0xffffff, hazardTex(), { hatch: false }),
+    lane: toon(COL.lane),
+    hazard: T(0xffffff, hazardTex()),
     concrete: T(COL.concrete, concreteTex()),
-    stone: toon(COL.stone), plinth: toon(COL.plinth, { hatch: false }),
-    rust: toon(COL.rust), ink: toon(COL.ink, { hatch: false }),
-    door: toon('#6b4a3a', { hatch: false }),
-    frame: toon(COL.frame, { hatch: false }),
-    windows: [0, 1, 2].map((v) => T(0xffffff, windowTex(v), { hatch: false })),
+    stone: toon(COL.stone), plinth: toon(COL.plinth),
+    rust: toon(COL.rust), ink: toon(COL.ink),
+    doors: ['#3f6f68', '#8c3f35', '#3d5a8c', '#6b4a3a'].map((c) => T(0xffffff, doorTex(c))),
+    frame: toon(COL.frame),
+    windows: [0, 1, 2].map((v) => T(0xffffff, windowTex(v))),
     roller: T(0xffffff, stripeTex('#9aa1a8', '#7d848c', { across: true, n: 10 })),
     barrier: T(0xffffff, stripeTex('#e9e1cf', HEX.awningA, { n: 6 })),
     walls: [COL.wall, COL.wallAlt, COL.wallPink, COL.wallBlue].map((c) => T(c, stuccoTex())),
@@ -87,9 +87,10 @@ export function buildArena(scene) {
   for (const [i, [x, z]] of [[-10, -9], [10, -9], [-10, 9], [10, 9]].entries()) {
     const h = [4.8, 6, 4, 5.2][i];
     box(x, z, 6, 6, h, M.walls[i], true);
-    // dark plinth grounds the building; overhanging cornice gives it a lid
+    // dark plinth grounds the building; overhanging cornice gives it a lid.
+    // The cornice stands 4 cm proud of the roof so the two tops never share a plane.
     add(B(6.08, 0.55, 6.08), M.plinth, x, 0.275, z);
-    g.add(mesh(B(6.24, 0.24, 6.24), M.stone, x, h - 0.12, z));
+    g.add(mesh(B(6.24, 0.28, 6.24), M.stone, x, h - 0.1, z));
     const rows = h >= 5.2 ? [2, 3.4, 4.6] : [2, 3.4];
     let wv = i;
     for (const side of [-1, 1]) {
@@ -101,23 +102,26 @@ export function buildArena(scene) {
           if (!(i === 2 && side < 0 && y === 2)) g.add(mesh(B(0.06, 0.75, 0.8), M.windows[wv++ % 3], x + side * 3, y, z + offset));
         }
       }
-      // door with a light frame
-      g.add(mesh(B(1.3, 1.8, 0.05), M.frame, x, 0.9, z + side * 2.99));
-      g.add(mesh(B(1.1, 1.65, 0.07), M.door, x, 0.825, z + side * 2.99));
-      // striped awning over the door, sign board above it
+      // Door: frame bars and panel stand proud of the plinth (face at 3.04),
+      // the panel recessed 4 cm between the bars, with a step at the sill.
+      for (const dx of [-0.61, 0.61]) g.add(mesh(B(0.12, 1.84, 0.2), M.frame, x + dx, 0.92, z + side * 3.02));
+      g.add(mesh(B(1.34, 0.12, 0.2), M.frame, x, 1.78, z + side * 3.02));
+      g.add(mesh(B(1.1, 1.72, 0.16), M.doors[i], x, 0.86, z + side * 3.0));
+      add(B(1.5, 0.1, 0.36), M.stone, x, 0.05, z + side * 3.18);
+      // Striped awning: hung from the wall above the door, sloping down and out.
       const shop = SHOPS[i];
-      const awn = add(B(1.9, 0.08, 0.75), T(0xffffff, stripeTex('#f1e6cc', shop.trim), { hatch: false }), x, 1.95, z + side * 3.32);
-      awn.rotation.x = -side * 0.32; // outer edge droops
-      const board = new THREE.Mesh(B(1.7, 0.62, 0.08), [M.frame, M.frame, M.frame, M.frame, T(0xffffff, signTex(shop.name, shop.trim), { hatch: false }), M.frame]);
-      board.position.set(x, 2.55, z + side * 3.05);
+      const awn = add(B(1.9, 0.08, 0.8), T(0xffffff, stripeTex('#f1e6cc', shop.trim)), x, 2.18, z + side * 3.37);
+      awn.rotation.x = side * 0.38; // +X rotation lowers the +Z edge
+      const board = new THREE.Mesh(B(1.7, 0.62, 0.08), [M.frame, M.frame, M.frame, M.frame, T(0xffffff, signTex(shop.name, shop.trim)), M.frame]);
+      board.position.set(x, 2.68, z + side * 3.05);
       board.rotation.y = side > 0 ? 0 : Math.PI;
       board.castShadow = board.receiveShadow = true;
       decor.add(board);
     }
     // Southwest repair shop: broad roller door and hazard lintel.
     if (i === 2) {
-      g.add(mesh(B(0.05, 2.2, 3.5), M.roller, x - 2.99, 1.1, z));
-      g.add(mesh(B(0.07, 0.35, 3.6), M.hazard, x - 3.0, 2.4, z));
+      g.add(mesh(B(0.16, 2.2, 3.5), M.roller, x - 3.0, 1.1, z));
+      g.add(mesh(B(0.2, 0.35, 3.7), M.hazard, x - 3.0, 2.4, z));
     }
     // rooftop clutter for the skyline silhouette
     const r = rand(100 + i);
@@ -141,24 +145,29 @@ export function buildArena(scene) {
     const lowEnd = gateZ - 2, highStart = gateZ + 2;
     box(x, (-20 + lowEnd) / 2, 0.5, lowEnd + 20, 2.2, M.concrete, true);
     box(x, (20 + highStart) / 2, 0.5, 20 - highStart, 2.2, M.concrete, true);
+    // Gate pillars sit on the wall line. Drawn 0.74 m square, wider than the
+    // 0.5 m wall, so no face is coplanar with the wall (that z-fought and
+    // flickered whenever the camera moved). The collider stays 0.5 m.
     for (const z of [gateZ - 2.3, gateZ + 2.3]) {
-      box(x, z, 0.5, 0.5, 3.4, M.hazard);
-      g.add(mesh(B(0.6, 0.25, 0.6), M.plinth, x, 3.1, z));
+      g.add(mesh(B(0.74, 3.4, 0.74), M.hazard, x, 1.7, z));
+      colliders.push({ x, z, halfX: 0.25, halfZ: 0.25, height: 3.4 });
+      g.add(mesh(B(0.86, 0.22, 0.86), M.plinth, x, 3.35, z));
     }
     paint(Math.sign(x) * 19, gateZ, 1.8, 3.5, M.hazard);
   }
   // wall coping
   for (const z of [-20.25, 20.25]) add(B(41.2, 0.14, 0.66), M.stone, 0, 2.27, z);
   for (const [x, gateZ] of [[-20.25, -10], [20.25, 10]]) {
-    add(B(0.66, 0.14, gateZ - 2 + 20), M.stone, x, 2.27, (-20 + gateZ - 2) / 2);
-    add(B(0.66, 0.14, 20 - gateZ - 2), M.stone, x, 2.27, (20 + gateZ + 2) / 2);
+    // 2 cm higher than the north/south coping, so the corners do not z-fight
+    add(B(0.66, 0.14, gateZ - 2 + 20), M.stone, x, 2.29, (-20 + gateZ - 2) / 2);
+    add(B(0.66, 0.14, 20 - gateZ - 2), M.stone, x, 2.29, (20 + gateZ + 2) / 2);
   }
   // Posters pasted on the inner walls.
   const POSTERS = [['封锁区', HEX.awningA], ['小心', HEX.hazard], ['寻人', '#6b86ab'], ['撤离', HEX.awningB]];
   const pr = rand(7);
   for (let k = 0; k < 14; k++) {
     const [text, col] = POSTERS[k % POSTERS.length];
-    const mat = T(0xffffff, signTex(text, col, 2), { hatch: false });
+    const mat = T(0xffffff, signTex(text, col, 2));
     const along = -17 + pr() * 34, y = 1.05 + pr() * 0.3, sz = 0.7 + pr() * 0.3;
     const p = new THREE.Mesh(new THREE.PlaneGeometry(sz, sz * 0.5), mat);
     p.receiveShadow = true;
@@ -209,7 +218,7 @@ function groundDetail(parent) {
     decor.add(m);
     return m;
   };
-  const decal = (color) => toon(color, { hatch: false });
+  const decal = (color) => toon(color);
   const manhole = decal('#4a4f5c'), ring = decal(HEX.ink);
   for (const [x, z] of [[-16, -4], [16, 5], [-4, 16], [6, -16], [-14, 18]]) {
     lay(new THREE.RingGeometry(0.42, 0.5, 20), ring, x, z, 0.03);
@@ -237,10 +246,10 @@ function outskirts(decor, M) {
     decor.add(m);
     return m;
   };
-  add(new THREE.PlaneGeometry(240, 240), toon(COL.paver, { hatch: false }), 0, -0.02, 0).rotation.x = -Math.PI / 2;
+  add(new THREE.PlaneGeometry(240, 240), toon(COL.paver), 0, -0.02, 0).rotation.x = -Math.PI / 2;
 
   // Street lamps just outside the wall, leaning their heads over it.
-  const pole = toon('#3d4152', { hatch: false }), bulb = flat(COL.lamp);
+  const pole = toon('#3d4152'), bulb = flat(COL.lamp);
   for (const s of [-1, 1]) {
     for (let t = -16; t <= 16; t += 8) {
       for (const [x, z, ry] of [[t, s * 21.2, s > 0 ? 0 : Math.PI], [s * 21.2, t, s > 0 ? Math.PI / 2 : -Math.PI / 2]]) {
@@ -259,7 +268,7 @@ function outskirts(decor, M) {
   }
 
   // Utility poles with sagging cables along north and south.
-  const wood = toon('#6b4e3a', { hatch: false });
+  const wood = toon('#6b4e3a');
   const cable = new THREE.MeshBasicMaterial({ color: HEX.ink });
   for (const s of [-1, 1]) {
     const z = s * 23.5, xs = [-24, -12, 0, 12, 24];
@@ -282,7 +291,7 @@ function outskirts(decor, M) {
   const CARS = [[-25, 4, 0.3, '#b4544a'], [24, -4, -0.2, '#5f86b3'], [6, 25, 1.4, '#d8b04a'], [-9, -25.5, 1.7, '#7aa07a'], [23.5, 16, 0.1, '#e1d9c8']];
   for (const [x, z, ry, color] of CARS) {
     const car = new THREE.Group();
-    const body = toon(color), glass = toon(COL.glass, { hatch: false }), tyre = toon(HEX.ink, { hatch: false });
+    const body = toon(color), glass = toon(COL.glass), tyre = toon(HEX.ink);
     car.add(mesh(B(1.8, 0.7, 4), body, 0, 0.55, 0));
     car.add(mesh(B(1.6, 0.6, 2.1), body, 0, 1.2, -0.2));
     car.add(mesh(B(1.64, 0.42, 1.7), glass, 0, 1.22, -0.2));
@@ -298,8 +307,8 @@ function outskirts(decor, M) {
 
   // Hazy skyline: a ring of plain blocks that the fog turns mauve.
   const r = rand(77);
-  const tints = ['#c9a3a6', '#b8a3b8', '#cfae9e', '#ad9fbb'].map((c) => toon(c, { hatch: false }));
-  const sill = toon('#f0d6ae', { hatch: false });
+  const tints = ['#c9a3a6', '#b8a3b8', '#cfae9e', '#ad9fbb'].map((c) => toon(c));
+  const sill = toon('#f0d6ae');
   for (let k = 0; k < 40; k++) {
     const a = (k / 40) * Math.PI * 2 + r() * 0.08, d = 40 + r() * 16;
     const w = 6 + r() * 6, dep = 6 + r() * 6, h = 5 + r() * 9 + (k % 7 === 0 ? 8 : 0);

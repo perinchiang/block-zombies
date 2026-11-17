@@ -218,6 +218,35 @@ export function windowTex(variant = 0) {
   }, { repeat: false });
 }
 
+/** Shop door: painted wood, two recessed panels, a glass light, handle and kick plate. */
+export function doorTex(color) {
+  return tex(`door:${color}`, 256, (g, w, h) => {
+    const r = rng(13);
+    g.fillStyle = color; g.fillRect(0, 0, w, h);
+    // wood grain
+    g.strokeStyle = 'rgba(29,27,33,0.12)'; g.lineWidth = 2;
+    for (let x = 10; x < w; x += 14 + r() * 10) pen(g, [[x, 0], [x + 3, h * 0.5], [x, h]], r, 2);
+    const m = w * 0.14;
+    // glass light at the top
+    g.fillStyle = HEX.glass; g.fillRect(m, h * 0.08, w - 2 * m, h * 0.26);
+    g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = w * 0.035;
+    pen(g, [[w * 0.3, h * 0.28], [w * 0.45, h * 0.12]], r, 0);
+    // recessed panel, shadowed on its top-left like a moulding
+    g.fillStyle = 'rgba(29,27,33,0.18)'; g.fillRect(m, h * 0.42, w - 2 * m, h * 0.36);
+    g.fillStyle = 'rgba(255,240,220,0.14)'; g.fillRect(m + 6, h * 0.42 + 6, w - 2 * m - 6, h * 0.36 - 6);
+    // kick plate
+    g.fillStyle = '#9aa1a8'; g.fillRect(0, h * 0.88, w, h * 0.12);
+    g.strokeStyle = HEX.ink; g.lineWidth = w * 0.03;
+    g.strokeRect(m, h * 0.08, w - 2 * m, h * 0.26);
+    g.strokeRect(m, h * 0.42, w - 2 * m, h * 0.36);
+    pen(g, [[0, h * 0.88], [w, h * 0.88]], r, 0);
+    // handle
+    g.fillStyle = HEX.hazard; g.fillRect(w * 0.76, h * 0.56, w * 0.08, h * 0.05);
+    g.strokeRect(w * 0.76, h * 0.56, w * 0.08, h * 0.05);
+    g.lineWidth = w * 0.05; g.strokeRect(2, 2, w - 4, h - 4);
+  }, { repeat: false, height: Math.round(256 * 1.6) });
+}
+
 /** Shop sign or poster: cream board, bold ink lettering, coloured border. `aspect` = width / height. */
 export function signTex(text, color, aspect = 2.75) {
   return tex(`sign:${text}:${color}:${aspect}`, 512, (g, w, h) => {
