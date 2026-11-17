@@ -5,11 +5,11 @@ import { COL } from '../render/palette.js';
 // One shared box and palette for every demon; posing allocates no resources.
 const BOX = new THREE.BoxGeometry(1, 1, 1);
 const MAT = {
-  red: toon(COL.blood, { hatch: false, shadeInk: 0.15 }),
-  ink: toon(COL.ink, { hatch: false }),
-  cream: toon(COL.paper, { hatch: false }),
+  red: toon(COL.blood, { shadeInk: 0.15 }),
+  ink: toon(COL.ink),
+  cream: toon(COL.paper),
 };
-const FLASH = toon(COL.paper, { hatch: false, mid: 1 });
+const FLASH = toon(COL.paper, { mid: 1 });
 
 function block(parent, material, w, h, d, x, y, z = 0) {
   const mesh = new THREE.Mesh(BOX, material);

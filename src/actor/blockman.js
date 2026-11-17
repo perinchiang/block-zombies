@@ -23,22 +23,19 @@ function looks(kind, variant) {
   const key = `${kind}:${variant}`;
   if (cache.has(key)) return cache.get(key);
   const zombie = kind === 'zombie';
-  // Characters get clean colour shadows, no halftone: dots on small moving
-  // boxes read as noise, and the figures should be the cleanest thing on screen.
   const [shirt, trousers] = zombie ? ZOMBIE_CLOTHES[variant % ZOMBIE_CLOTHES.length] : [COL.hero, COL.heroDark];
-  const plain = { hatch: false };
   const m = {
-    skin: toon(zombie ? COL.zombie : COL.skin, plain),
-    cloth: toon(shirt, plain),
-    pants: toon(trousers, { hatch: false, shadeInk: 0.1 }),
-    hair: toon(zombie ? COL.ink : COL.hair, { hatch: false, mid: 0.85 }),
-    face: toon(0xffffff, { map: zombie ? zombieFace(variant) : heroFace(), hatch: false }),
-    chest: toon(0xffffff, { map: zombie ? zombieShirt(variant, shirt) : heroJacket(), hatch: false }),
+    skin: toon(zombie ? COL.zombie : COL.skin),
+    cloth: toon(shirt),
+    pants: toon(trousers, { shadeInk: 0.1 }),
+    hair: toon(zombie ? COL.ink : COL.hair, { mid: 0.85 }),
+    face: toon(0xffffff, { map: zombie ? zombieFace(variant) : heroFace() }),
+    chest: toon(0xffffff, { map: zombie ? zombieShirt(variant, shirt) : heroJacket() }),
   };
   cache.set(key, m);
   return m;
 }
-const FLASH = toon(COL.paper, { hatch: false, mid: 1 });
+const FLASH = toon(COL.paper, { mid: 1 });
 
 function part(geo, mat, y = 0) {
   const m = new THREE.Mesh(geo, mat);
@@ -84,7 +81,7 @@ export class BlockMan {
       const back = part(box(hs * 1.06, hs * 0.86, hs * 0.18), M.hair, hs * 0.57);
       back.position.z = -hs * 0.46;
       // Paper headband, knotted at the back: the mark you follow from behind.
-      const cloth = toon(COL.paper, { hatch: false, mid: 0.86 });
+      const cloth = toon(COL.paper, { mid: 0.86 });
       const band = part(box(hs * 1.1, hs * 0.16, hs * 1.1), cloth, hs * 0.74);
       this.head.add(cap, back, band);
     }
@@ -102,10 +99,10 @@ export class BlockMan {
       // Backpack and bedroll: most of the game is spent looking at this side.
       // Two big shapes only; flap, straps and pocket are drawn on the pack so
       // the ink pass does not outline a cluster of tiny boxes.
-      const leather = toon(COL.pack, { hatch: false, mid: 0.84 });
-      const packBack = toon(0xffffff, { map: packTex(), hatch: false, mid: 0.84 });
+      const leather = toon(COL.pack, { mid: 0.84 });
+      const packBack = toon(0xffffff, { map: packTex(), mid: 0.84 });
       const pack = part(box(0.32, 0.34, 0.16), [leather, leather, leather, leather, leather, packBack], 0.26); pack.position.z = -0.21;
-      const roll = part(new THREE.CylinderGeometry(0.07, 0.07, 0.42, 12), toon(COL.blind, { hatch: false, mid: 0.86 }), 0.5);
+      const roll = part(new THREE.CylinderGeometry(0.07, 0.07, 0.42, 12), toon(COL.blind, { mid: 0.86 }), 0.5);
       roll.rotation.z = Math.PI / 2; roll.position.z = -0.2;
       this.torso.add(pack, roll);
 

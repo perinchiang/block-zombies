@@ -3,7 +3,9 @@ import { COL } from './palette.js';
 
 // Comic sky: a warm horizon under a deep blue top. The blend between the two
 // is printed as halftone dots rather than a smooth gradient, like a coloured
-// comic page. Drawn on the camera so it never runs out of far plane.
+// comic page. The dots are pinned to directions in the sky, not to screen
+// pixels, so they turn with the view instead of sliding over it. Drawn on
+// the camera so it never runs out of far plane.
 const VERT = /* glsl */ `
   varying vec3 vDir;
   void main() {
@@ -17,18 +19,21 @@ const FRAG = /* glsl */ `
   uniform vec3 uTop, uMid, uHorizon;
   uniform float uDot;
   varying vec3 vDir;
-  float dots(float amount) {
-    vec2 p = mat2(0.7071, -0.7071, 0.7071, 0.7071) * gl_FragCoord.xy / uDot;
+  float dots(vec3 d, float amount) {
+    // azimuth / elevation grid, uDot cells per radian, turned 45 degrees
+    vec2 a = vec2(atan(d.x, d.z), asin(clamp(d.y, -1.0, 1.0))) * uDot;
+    vec2 p = mat2(0.7071, -0.7071, 0.7071, 0.7071) * a;
     float d = length(fract(p) - 0.5);
     return 1.0 - smoothstep(amount - 0.04, amount + 0.02, d);
   }
   void main() {
-    float h = normalize(vDir).y;
+    vec3 dir = normalize(vDir);
+    float h = dir.y;
     // horizon -> warm band, solid
     vec3 col = mix(uHorizon, uMid, smoothstep(0.02, 0.16, h));
     // warm band -> blue top, printed: dot radius shrinks as the blue takes over
     float t = smoothstep(0.16, 0.5, h);
-    float warmDots = dots(0.62 * (1.0 - t));
+    float warmDots = dots(dir, 0.62 * (1.0 - t));
     col = mix(uTop, col, h < 0.16 ? 1.0 : warmDots);
     gl_FragColor = vec4(col, 1.0);
     #include <colorspace_fragment>
@@ -48,7 +53,8 @@ export function makeSky() {
         uTop: { value: COL.skyTop },
         uMid: { value: COL.skyMid },
         uHorizon: { value: COL.horizon },
-        uDot: { value: 9 },
+        // cells per radian; picked so the turned grid closes exactly at azimuth ±π (no seam)
+        uDot: { value: 151 / (Math.PI * Math.SQRT2) },
       },
     }),
   );

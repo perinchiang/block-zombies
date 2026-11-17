@@ -18,11 +18,11 @@ function piece(mat, w, h, d, x = 0, y = 0, z = 0, tilt = 0) {
 let mats;
 function materials() {
   return (mats ??= {
-    body: toon(COL.gunmetal, { hatch: false, mid: 0.85, shadeInk: 0.25 }),
-    steel: toon(COL.steel, { hatch: false, mid: 0.8 }),
-    wood: toon(COL.wood, { hatch: false, mid: 0.8 }),
-    dark: toon(COL.gunDark, { hatch: false, mid: 0.82, shadeInk: 0.3 }),
-    mark: toon(COL.hero, { hatch: false }),
+    body: toon(COL.gunmetal, { mid: 0.85, shadeInk: 0.25 }),
+    steel: toon(COL.steel, { mid: 0.8 }),
+    wood: toon(COL.wood, { mid: 0.8 }),
+    dark: toon(COL.gunDark, { mid: 0.82, shadeInk: 0.3 }),
+    mark: toon(COL.hero),
   });
 }
 

@@ -16,7 +16,7 @@ import { Profile } from './game/profile.js';
 //   ?still          freeze time (screenshots)
 //   ?skip           skip the title card
 //   ?auto           autopilot plays the round (tests); ?speed=3 runs faster
-//   ?shade=flat     solid ink shadows instead of hatching (style comparison)
+//   ?shade=flat     solid ink shadows instead of colour shadows (style comparison)
 //   ?cam=x,y,z   camera offset in hero space (right, up, back)
 //   ?fps            show a frame-time readout
 //   ?inspect=deg,dist,height  orbit the hero for model screenshots (0 = from the front)
@@ -109,8 +109,6 @@ function resize() {
   renderer.setSize(W, H, false);
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
   ink.setSize(size.x, size.y, H < 500 ? 1.8 : 2.2);
-  TOON.hatch.value = 5 * dpr;
-  sky.material.uniforms.uDot.value = 9 * dpr;
   camera.aspect = W / H;
   camera.fov = 50 + THREE.MathUtils.clamp((1.9 - camera.aspect) / 0.6, 0, 1) * 10;
   camera.updateProjectionMatrix();

@@ -5,7 +5,7 @@ import { COL } from '../render/palette.js';
 export class CoinDrops {
   constructor(scene, capacity = 4) {
     this.scene = scene;
-    const gold = toon(COL.gold, { hatch: false, mid: 0.86, shadeInk: 0.2 });
+    const gold = toon(COL.gold, { mid: 0.86, shadeInk: 0.2 });
     const disc = new THREE.CylinderGeometry(0.2, 0.2, 0.07, 12);
     this.items = Array.from({ length: capacity }, () => {
       const root = new THREE.Group();

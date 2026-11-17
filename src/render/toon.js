@@ -1,10 +1,8 @@
 import * as THREE from 'three';
 import { COL } from './palette.js';
 
-// Shared by every toon material; dot spacing follows device pixels.
 export const TOON = {
-  hatch: { value: 7 },
-  flat: false, // read at material creation: solid ink shadows, no dots
+  flat: false, // read at material creation: solid ink shadows for comparison
 };
 
 // Light rig is calibrated so that, after Lambert's 1/PI, a face fully turned
@@ -12,7 +10,9 @@ export const TOON = {
 export const LIGHT = { sun: 2.25, ambient: 0.9 };
 
 // Coloured-comic banding: lit = the colour, mid = a slightly cooler step,
-// shadow = the colour pushed toward violet, printed with halftone dots.
+// shadow = the colour pushed toward violet. Shadows are plain fills: any
+// screen-space pattern (hatching, halftone) stays put while surfaces slide
+// under it, which reads as dirt on the screen whenever the camera moves.
 const CHUNK = /* glsl */ `
   vec3 _base = diffuseColor.rgb;
   float _lb = dot(_base, vec3(0.299, 0.587, 0.114));
@@ -28,35 +28,27 @@ const CHUNK = /* glsl */ `
   } else {
     _col = mix(_base * 0.62, uShade, 0.3);
     _col = mix(_col, uInk, uShadeInk);
-    if (uHatchOn > 0.5) {
-      // 45-degree halftone screen, dots a touch darker than the shadow fill
-      vec2 _p = mat2(0.7071, -0.7071, 0.7071, 0.7071) * gl_FragCoord.xy / uHatch;
-      float _d = length(fract(_p) - 0.5);
-      _col = mix(_col, _col * 0.62 + uShade * 0.12, 1.0 - smoothstep(0.26, 0.31, _d));
-    }
   }
   gl_FragColor = vec4(_col, diffuseColor.a);
 `;
 
 /**
- * Three-band cel material: lit / mid / violet shadow with halftone dots.
+ * Three-band cel material: lit / mid / violet shadow.
  * Built on Lambert so shadow maps and fog keep working.
  * `shadeInk` (0..1) pushes the shadow toward ink for small dark parts.
  */
-export function toon(color, { map = null, mid = 0.84, shadeInk = 0, hatch = true, side = THREE.FrontSide } = {}) {
+export function toon(color, { map = null, mid = 0.84, shadeInk = 0, side = THREE.FrontSide } = {}) {
   const m = new THREE.MeshLambertMaterial({ color, map, side });
   m.onBeforeCompile = (s) => {
     s.uniforms.uInk = { value: COL.ink };
     s.uniforms.uShade = { value: COL.shadow };
     s.uniforms.uMid = { value: mid };
     s.uniforms.uShadeInk = { value: TOON.flat ? 0.7 : shadeInk };
-    s.uniforms.uHatchOn = { value: hatch && !TOON.flat ? 1 : 0 };
-    s.uniforms.uHatch = TOON.hatch;
     s.fragmentShader = s.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec3 uInk, uShade;\nuniform float uMid, uShadeInk, uHatchOn, uHatch;')
+      .replace('#include <common>', '#include <common>\nuniform vec3 uInk, uShade;\nuniform float uMid, uShadeInk;')
       .replace('#include <opaque_fragment>', CHUNK);
   };
-  m.customProgramCacheKey = () => 'toon-v2';
+  m.customProgramCacheKey = () => 'toon-v3';
   return m;
 }
 
